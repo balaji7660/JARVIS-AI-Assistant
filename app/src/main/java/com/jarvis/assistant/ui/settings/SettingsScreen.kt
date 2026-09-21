@@ -179,12 +179,119 @@ fun SettingsScreen(
                 }
 
                 item {
-                    SettingsSectionCard(
-                        title = "AI",
-                        subtitle = "Model provider, reasoning effort, API endpoints",
-                        icon = Icons.Outlined.Psychology,
-                        statusText = "Milestone 3+"
-                    )
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    var serverUrlText by androidx.compose.runtime.remember {
+                        androidx.compose.runtime.mutableStateOf(com.jarvis.assistant.data.remote.ApiClient.getBaseUrl())
+                    }
+                    var isSavedFeedback by androidx.compose.runtime.remember {
+                        androidx.compose.runtime.mutableStateOf(false)
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, JarvisCyan.copy(alpha = 0.35f), RoundedCornerShape(16.dp)),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = JarvisSurface.copy(alpha = 0.9f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(JarvisSurfaceVariant)
+                                        .border(1.dp, JarvisCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Psychology,
+                                        contentDescription = "AI Backend",
+                                        tint = JarvisCyan,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.size(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "AI Backend Server",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "Cloud Host / Public Tunnel Endpoint",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+
+                            androidx.compose.material3.OutlinedTextField(
+                                value = serverUrlText,
+                                onValueChange = {
+                                    serverUrlText = it
+                                    isSavedFeedback = false
+                                },
+                                label = { Text("Server URL (http/https)", color = TextMuted) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = JarvisCyan,
+                                    unfocusedBorderColor = JarvisCyan.copy(alpha = 0.3f),
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    cursorColor = JarvisCyan
+                                )
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        com.jarvis.assistant.data.remote.ApiClient.setBaseUrl(serverUrlText.trim(), context)
+                                        serverUrlText = com.jarvis.assistant.data.remote.ApiClient.getBaseUrl()
+                                        isSavedFeedback = true
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSavedFeedback) "Connected!" else "Save & Connect",
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                androidx.compose.material3.OutlinedButton(
+                                    onClick = {
+                                        val defaultUrl = com.jarvis.assistant.data.remote.ApiClient.DEFAULT_BASE_URL
+                                        com.jarvis.assistant.data.remote.ApiClient.setBaseUrl(defaultUrl, context)
+                                        serverUrlText = defaultUrl
+                                        isSavedFeedback = false
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, JarvisCyan.copy(alpha = 0.4f))
+                                ) {
+                                    Text("Reset", color = JarvisCyan)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 item {

@@ -10,6 +10,7 @@ import com.jarvis.assistant.ui.theme.JarvisTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.jarvis.assistant.data.remote.ApiClient.init(applicationContext)
         enableEdgeToEdge()
         setContent {
             JarvisTheme {

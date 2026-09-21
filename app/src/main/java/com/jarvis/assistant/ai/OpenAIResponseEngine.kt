@@ -29,13 +29,15 @@ import java.net.SocketTimeoutException
  * 4. Returns finalized conversational reply.
  */
 class OpenAIResponseEngine(
-    private val chatApiService: ChatApiService = ApiClient.getChatApiService(),
+    private val chatApiService: ChatApiService? = null,
     private val sessionId: String = "default",
     private val toolRouter: ToolRouter? = null,
     private val onToolExecuting: ((String?) -> Unit)? = null,
     private val fallbackEngine: ResponseEngine? = LocalResponseEngine(),
     private val overallTimeoutMs: Long = DEFAULT_OVERALL_TIMEOUT_MS
 ) : ResponseEngine {
+
+    private fun getApiService(): ChatApiService = chatApiService ?: ApiClient.getChatApiService()
 
     companion object {
         private const val TAG = "OpenAIResponseEngine"
@@ -75,7 +77,7 @@ class OpenAIResponseEngine(
 
     private suspend fun executeAutomationLoop(trimmedPrompt: String, originalPrompt: String): String {
         return try {
-            var response = chatApiService.sendMessage(
+            var response = getApiService().sendMessage(
                 ChatRequest(
                     message = trimmedPrompt,
                     sessionId = sessionId
@@ -123,7 +125,7 @@ class OpenAIResponseEngine(
 
                 // Send tool execution outcome back to backend
                 try {
-                    response = chatApiService.sendMessage(
+                    response = getApiService().sendMessage(
                         ChatRequest(
                             sessionId = sessionId,
                             toolResult = mapOf(

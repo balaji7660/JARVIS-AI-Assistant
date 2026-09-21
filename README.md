@@ -62,13 +62,15 @@ JarvisOverlayService (WindowManager / ComposeView)
 - Java Development Kit (JDK 17)
 - Node.js 18+ (for local backend daemon)
 
-### 1. Start the Backend Daemon
+### 1. Start the Backend Daemon (Local or Cloud)
 ```bash
 cd backend
 npm install
 npm start
 # Health check available at: http://localhost:3000/health
 ```
+> 🌐 **Deploying to Cloud or Remote Mobile Access:**
+> See the complete [Deployment Guide](deploy/DEPLOYMENT.md) for 1-click **Render** cloud hosting, **Railway/Docker**, or instant public tunneling (`npm run tunnel`).
 
 ### 2. Build and Install Android App
 ```bash

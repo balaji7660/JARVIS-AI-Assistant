@@ -26,9 +26,11 @@ class AnalyzeScreenTool(
     private val screenCaptureProvider: ScreenCaptureProvider,
     private val screenPrivacyFilter: ScreenPrivacyFilter = ScreenPrivacyFilter(),
     private val automationProvider: AndroidAutomationProvider,
-    private val chatApiService: ChatApiService = ApiClient.getChatApiService(),
+    private val chatApiService: ChatApiService? = null,
     private val onStatusUpdate: ((ScreenAnalysisState, String?) -> Unit)? = null
 ) : JarvisTool {
+
+    private fun getApiService(): ChatApiService = chatApiService ?: ApiClient.getChatApiService()
 
     companion object {
         private const val TAG = "AnalyzeScreenTool"
@@ -89,7 +91,7 @@ class AnalyzeScreenTool(
                         focus = focus
                     )
 
-                    val response = chatApiService.analyzeScreen(request)
+                    val response = getApiService().analyzeScreen(request)
                     if (response.success) {
                         onStatusUpdate?.invoke(ScreenAnalysisState.COMPLETE, "Screen analysis complete.")
                         return@withContext ToolResult(
