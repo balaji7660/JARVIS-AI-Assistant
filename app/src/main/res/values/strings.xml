@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">JARVIS</string>
+    <string name="title_settings">JARVIS Settings</string>
+    <string name="accessibility_service_description">JARVIS uses Accessibility access solely to inspect visible controls and interact with on-screen buttons on your explicit command. Sensitive information such as passwords and payment credentials are never captured or accessed.</string>
+</resources>
