@@ -87,6 +87,15 @@ describe('JARVIS Backend Chat API Tests', () => {
     }
   });
 
+  test('GET / returns status ok and endpoint information', async () => {
+    const res = await fetch(`${baseUrl}/`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.status, 'ok');
+    assert.equal(data.service, 'JARVIS AI Assistant Backend');
+    assert.ok(data.endpoints);
+  });
+
   test('GET /health returns status ok', async () => {
     const res = await fetch(`${baseUrl}/health`);
     assert.equal(res.status, 200);
