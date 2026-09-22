@@ -11,8 +11,8 @@ import java.util.concurrent.TimeUnit
  */
 object ApiClient {
 
-    // Default Android emulator host loopback address
-    const val DEFAULT_BASE_URL = "http://10.0.2.2:3000/"
+    // Production cloud backend deployment on Render
+    const val DEFAULT_BASE_URL = "https://jarvis-ai-assistant-qvzy.onrender.com/"
 
     const val PREFS_NAME = "jarvis_network_prefs"
     const val KEY_BACKEND_URL = "backend_base_url"
@@ -26,8 +26,11 @@ object ApiClient {
     fun init(context: android.content.Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val saved = prefs.getString(KEY_BACKEND_URL, null)
-        if (!saved.isNullOrBlank()) {
+        // Automatically migrate legacy emulator/localhost URLs to the production cloud backend
+        if (!saved.isNullOrBlank() && !saved.contains("10.0.2.2") && !saved.contains("localhost")) {
             setBaseUrl(saved)
+        } else {
+            setBaseUrl(DEFAULT_BASE_URL, context)
         }
     }
 
