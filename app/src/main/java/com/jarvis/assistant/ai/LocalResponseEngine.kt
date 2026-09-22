@@ -64,10 +64,10 @@ class LocalResponseEngine(
                 "I am JARVIS, your personal AI assistant."
             }
             isCapabilitiesQuery(normalized) -> {
-                "I can listen to your voice and respond. Soon I'll be able to control supported Android tasks."
+                "I am your JARVIS AI assistant, boss. I can automate apps, open settings, navigate your screen, answer questions, and manage tasks."
             }
             else -> {
-                "I heard you, boss. AI capabilities will be connected in the next milestone."
+                "I heard you, boss. I'm currently operating in on-device mode. To enable full GPT cloud AI responses, ensure your OPENAI_API_KEY is configured on your Render server."
             }
         }
     }
