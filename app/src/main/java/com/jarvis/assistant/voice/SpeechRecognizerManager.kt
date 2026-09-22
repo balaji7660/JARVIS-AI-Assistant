@@ -47,10 +47,14 @@ class SpeechRecognizerManager(
             }
 
             try {
-                if (speechRecognizer == null) {
-                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                        setRecognitionListener(createListener())
-                    }
+                // Always destroy stale recognizer instance to prevent Android ERROR_CLIENT binder corruption
+                try {
+                    speechRecognizer?.destroy()
+                } catch (_: Exception) {}
+                speechRecognizer = null
+
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                    setRecognitionListener(createListener())
                 }
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -59,6 +63,7 @@ class SpeechRecognizerManager(
                         RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                     )
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toLanguageTag())
+                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 }
@@ -85,7 +90,9 @@ class SpeechRecognizerManager(
         mainHandler.post {
             try {
                 speechRecognizer?.cancel()
+                speechRecognizer?.destroy()
             } catch (_: Exception) {}
+            speechRecognizer = null
             isListening = false
         }
     }
@@ -123,15 +130,20 @@ class SpeechRecognizerManager(
 
             override fun onError(error: Int) {
                 isListening = false
+                try {
+                    speechRecognizer?.destroy()
+                } catch (_: Exception) {}
+                speechRecognizer = null
+
                 val message = when (error) {
                     SpeechRecognizer.ERROR_AUDIO -> "Audio recording error."
-                    SpeechRecognizer.ERROR_CLIENT -> "Client recognition error."
+                    SpeechRecognizer.ERROR_CLIENT -> "Google Speech service unavailable or busy. Please check Google app microphone permissions."
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required."
-                    SpeechRecognizer.ERROR_NETWORK -> "Network connection required."
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network connection timed out."
+                    SpeechRecognizer.ERROR_NETWORK -> "Network connection required for speech recognition."
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Speech recognition network timed out."
                     SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected. Please try again."
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech service is busy."
-                    SpeechRecognizer.ERROR_SERVER -> "Recognition server error."
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech service is busy. Please try again."
+                    SpeechRecognizer.ERROR_SERVER -> "Recognition server error. Please try again."
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected."
                     else -> "Speech recognition error ($error)."
                 }
@@ -140,6 +152,11 @@ class SpeechRecognizerManager(
 
             override fun onResults(results: Bundle?) {
                 isListening = false
+                try {
+                    speechRecognizer?.destroy()
+                } catch (_: Exception) {}
+                speechRecognizer = null
+
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val finalTranscript = matches?.firstOrNull()?.trim().orEmpty()
                 if (finalTranscript.isNotEmpty()) {
