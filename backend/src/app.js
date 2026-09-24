@@ -3,16 +3,25 @@ import cors from 'cors';
 import { createChatRouter } from './routes/chatRoutes.js';
 import { createPlanRouter } from './routes/planRoutes.js';
 import { createScreenRouter } from './routes/screenRoutes.js';
-import { OpenAIProvider } from './services/ai/OpenAIProvider.js';
+import { createOllamaRouter } from './routes/ollamaRoutes.js';
+import { getAIProvider, getActiveProviderName } from './services/ai/providerFactory.js';
 import { PlanService } from './services/ai/PlanService.js';
 import { ConversationManager } from './services/conversationManager.js';
+import { OllamaProvider } from './services/ai/OllamaProvider.js';
+import { PuterProvider } from './services/ai/PuterProvider.js';
 
 export function createApp({
-  aiProvider = new OpenAIProvider(),
-  planService = new PlanService(),
+  aiProvider = null,
+  planService = null,
   conversationManager = new ConversationManager(10)
 } = {}) {
   const app = express();
+
+  const resolvedAiProvider = aiProvider || getAIProvider();
+  const resolvedPlanService = planService || new PlanService({ aiProvider: resolvedAiProvider });
+  const activeProviderName = resolvedAiProvider instanceof PuterProvider
+    ? 'puter'
+    : (resolvedAiProvider instanceof OllamaProvider ? 'ollama' : getActiveProviderName());
 
   app.use(cors());
   app.use(express.json({ limit: '10mb' }));
@@ -62,12 +71,21 @@ export function createApp({
       margin-bottom: 20px;
       border: 1px solid rgba(46, 160, 67, 0.3);
     }
+    .badge.local {
+      background: rgba(88, 166, 255, 0.15);
+      color: #58a6ff;
+      border: 1px solid rgba(88, 166, 255, 0.3);
+    }
     .dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
       background: #3fb950;
       box-shadow: 0 0 10px #3fb950;
+    }
+    .dot.local {
+      background: #58a6ff;
+      box-shadow: 0 0 10px #58a6ff;
     }
     h1 {
       margin: 0 0 8px;
@@ -140,14 +158,21 @@ export function createApp({
 </head>
 <body>
   <div class="card">
-    <div class="badge"><span class="dot"></span> Online &amp; Operational</div>
+    <div class="badge ${activeProviderName === 'ollama' ? 'local' : (activeProviderName === 'puter' ? 'local' : '')}">
+      <span class="dot ${activeProviderName === 'ollama' ? 'local' : (activeProviderName === 'puter' ? 'local' : '')}"></span>
+      Active Engine: ${activeProviderName === 'ollama' ? 'Ollama Free Local AI' : (activeProviderName === 'puter' ? 'Puter AI Platform' : 'OpenAI Cloud')}
+    </div>
     <h1>JARVIS AI Backend</h1>
-    <p>Cloud server proxy is running live and ready to connect with your JARVIS mobile assistant.</p>
+    <p>Connected and ready to bridge requests from your JARVIS mobile assistant.</p>
     <div class="endpoints">
       <div class="endpoints-title">Available Endpoints</div>
       <div class="endpoint">
         <span><span class="method get">GET</span><a href="/health">/health</a></span>
         <span class="desc">Health Check</span>
+      </div>
+      <div class="endpoint">
+        <span><span class="method get">GET</span><a href="/api/ollama/status">/api/ollama/status</a></span>
+        <span class="desc">Ollama Local Status</span>
       </div>
       <div class="endpoint">
         <span><span class="method post">POST</span>/api/chat</span>
@@ -170,9 +195,12 @@ export function createApp({
     res.status(200).json({
       status: 'ok',
       service: 'JARVIS AI Assistant Backend',
+      activeProvider: activeProviderName,
       message: 'JARVIS backend server is running and ready to receive requests.',
       endpoints: {
         health: '/health',
+        aiStatus: '/api/ai/status',
+        ollamaStatus: '/api/ollama/status',
         chat: '/api/chat',
         plan: '/api/plan',
         screen: '/api/screen/analyze'
@@ -182,17 +210,45 @@ export function createApp({
 
   // Health check
   app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', service: 'jarvis-backend' });
+    res.status(200).json({
+      status: 'ok',
+      service: 'jarvis-backend',
+      provider: activeProviderName
+    });
+  });
+
+  // Unified AI status endpoint
+  app.get('/api/ai/status', async (req, res) => {
+    try {
+      const health = await resolvedAiProvider.checkHealth();
+      return res.status(200).json({
+        provider: activeProviderName,
+        configured: health.configured !== undefined ? health.configured : Boolean(health.available),
+        available: Boolean(health.available),
+        model: health.model || undefined,
+        ...(health.error ? { error: health.error } : {})
+      });
+    } catch (err) {
+      return res.status(200).json({
+        provider: activeProviderName,
+        configured: false,
+        available: false,
+        error: err.message
+      });
+    }
   });
 
   // Chat API router
-  app.use('/api', createChatRouter(aiProvider, conversationManager));
+  app.use('/api', createChatRouter(resolvedAiProvider, conversationManager));
 
   // Plan API router (Milestone 9)
-  app.use('/api', createPlanRouter(planService));
+  app.use('/api', createPlanRouter(resolvedPlanService));
 
   // Screen Analysis API router
-  app.use('/api/screen', createScreenRouter(aiProvider));
+  app.use('/api/screen', createScreenRouter(resolvedAiProvider));
+
+  // Ollama status router
+  app.use('/api/ollama', createOllamaRouter(resolvedAiProvider instanceof OllamaProvider ? resolvedAiProvider : undefined));
 
   return app;
 }

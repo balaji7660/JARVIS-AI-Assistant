@@ -33,7 +33,7 @@ class OpenAIResponseEngine(
     private val sessionId: String = "default",
     private val toolRouter: ToolRouter? = null,
     private val onToolExecuting: ((String?) -> Unit)? = null,
-    private val fallbackEngine: ResponseEngine? = LocalResponseEngine(),
+    private val fallbackEngine: ResponseEngine? = null,
     private val overallTimeoutMs: Long = DEFAULT_OVERALL_TIMEOUT_MS
 ) : ResponseEngine {
 
@@ -44,9 +44,10 @@ class OpenAIResponseEngine(
         const val MAX_AUTOMATION_STEPS = 10
         const val DEFAULT_OVERALL_TIMEOUT_MS = 45_000L // 45-second hard overall automation timeout
         const val ERROR_TIMEOUT = "Automation timed out, boss."
-        const val ERROR_NETWORK = "Boss, I'm having trouble connecting to my AI service right now."
-        const val ERROR_API_KEY = "Boss, the OpenAI API key is not configured on the server."
-        const val ERROR_UPSTREAM = "Boss, I encountered an issue while processing your request with OpenAI."
+        const val ERROR_BACKEND_UNAVAILABLE = "JARVIS backend is currently unavailable. Please try again."
+        const val ERROR_NETWORK = ERROR_BACKEND_UNAVAILABLE
+        const val ERROR_API_KEY = ERROR_BACKEND_UNAVAILABLE
+        const val ERROR_UPSTREAM = "JARVIS backend is currently unavailable. Please try again."
     }
 
     override suspend fun generateResponse(prompt: String): String = withContext(Dispatchers.IO) {
@@ -75,14 +76,29 @@ class OpenAIResponseEngine(
         }
     }
 
+    private val selfSufficientTools = setOf(
+        "open_app",
+        "go_home",
+        "press_back",
+        "get_time",
+        "get_date"
+    )
+
     private suspend fun executeAutomationLoop(trimmedPrompt: String, originalPrompt: String): String {
+        val t1 = System.currentTimeMillis()
         return try {
             var response = getApiService().sendMessage(
                 ChatRequest(
                     message = trimmedPrompt,
-                    sessionId = sessionId
+                    sessionId = sessionId,
+                    clientTimestamp = t1
                 )
             )
+
+            val t4 = System.currentTimeMillis()
+            val backendMs = response.timing?.get("backendProcessingMs")
+            val puterMs = response.timing?.get("puterLatencyMs")
+            Log.i(TAG, "[PipelineTiming] T1->T4 Roundtrip: ${t4 - t1}ms | Backend: ${backendMs}ms | Puter: ${puterMs}ms")
 
             var stepsExecuted = 0
             var activeTool = response.toolCall
@@ -105,6 +121,7 @@ class OpenAIResponseEngine(
 
                 onToolExecuting?.invoke(toolName)
 
+                val t6 = System.currentTimeMillis()
                 val toolResult = if (toolRouter != null) {
                     toolRouter.dispatch(toolCall)
                 } else {
@@ -114,8 +131,10 @@ class OpenAIResponseEngine(
                         message = "Tool '$toolName' cannot be executed because ToolRouter is not available."
                     )
                 }
+                val t7 = System.currentTimeMillis()
                 lastToolResult = toolResult
                 onToolExecuting?.invoke(null)
+                Log.i(TAG, "[PipelineTiming] Tool '$toolName' execution (T6->T7): ${t7 - t6}ms | Success: ${toolResult.success}")
 
                 // If tool requires user confirmation, halt loop and return notice
                 val requiresConfirmation = toolResult.data["requiresConfirmation"] as? Boolean ?: false
@@ -123,7 +142,15 @@ class OpenAIResponseEngine(
                     return toolResult.message
                 }
 
-                // Send tool execution outcome back to backend
+                // Phase 3 Optimization: If the tool result is self-sufficient (marked with directResponse)
+                val isDirectResponse = toolResult.data["directResponse"] as? Boolean ?: false
+                if (isDirectResponse && toolResult.message.isNotBlank()) {
+                    Log.i(TAG, "Fast-path: direct local tool '$toolName' response returned without redundant AI follow-up.")
+                    return toolResult.message
+                }
+
+                // Send tool execution outcome back to backend for tools requiring natural language synthesis
+                val t7Followup = System.currentTimeMillis()
                 try {
                     response = getApiService().sendMessage(
                         ChatRequest(
@@ -134,9 +161,12 @@ class OpenAIResponseEngine(
                                 "data" to toolResult.data
                             ),
                             toolCallId = activeTool.id,
-                            toolName = toolName
+                            toolName = toolName,
+                            clientTimestamp = t7Followup
                         )
                     )
+                    val t8 = System.currentTimeMillis()
+                    Log.i(TAG, "[PipelineTiming] Follow-up turn roundtrip (T7->T8): ${t8 - t7Followup}ms")
                     activeTool = response.toolCall
                 } catch (e: Exception) {
                     Log.w(TAG, "Follow-up turn failed; returning verified tool outcome", e)
@@ -153,9 +183,9 @@ class OpenAIResponseEngine(
             onToolExecuting?.invoke(null)
             Log.w(TAG, "HTTP error communicating with backend: ${e.code()}", e)
             when (e.code()) {
-                503 -> ERROR_API_KEY
-                400 -> fallbackEngine?.generateResponse(originalPrompt) ?: "I didn't catch that, boss."
-                else -> fallbackEngine?.generateResponse(originalPrompt) ?: ERROR_UPSTREAM
+                503 -> ERROR_BACKEND_UNAVAILABLE
+                400 -> "I didn't catch that, boss."
+                else -> ERROR_UPSTREAM
             }
         } catch (e: SocketTimeoutException) {
             onToolExecuting?.invoke(null)
@@ -164,11 +194,11 @@ class OpenAIResponseEngine(
         } catch (e: IOException) {
             onToolExecuting?.invoke(null)
             Log.w(TAG, "Network I/O error communicating with backend", e)
-            fallbackEngine?.generateResponse(originalPrompt) ?: ERROR_NETWORK
+            ERROR_NETWORK
         } catch (e: Exception) {
             onToolExecuting?.invoke(null)
             Log.e(TAG, "Unexpected error in OpenAIResponseEngine", e)
-            fallbackEngine?.generateResponse(originalPrompt) ?: ERROR_UPSTREAM
+            ERROR_UPSTREAM
         }
     }
 }

@@ -83,7 +83,16 @@ class AccessibilityAutomationProvider(
         val root = service.getRootInActiveWindowSafe()
             ?: return ToolResult(success = false, message = "Active window is not available to click.")
 
-        val matchingClickableNodes = mutableListOf<AccessibilityNodeInfo>()
+        // Priority matching buckets:
+        // Priority 1: Resource ID
+        // Priority 2: Exact visible text
+        // Priority 3: Exact content description
+        // Priority 4: Partial / containment visible text or description
+        val priority1ResourceId = mutableListOf<AccessibilityNodeInfo>()
+        val priority2ExactText = mutableListOf<AccessibilityNodeInfo>()
+        val priority3ExactDesc = mutableListOf<AccessibilityNodeInfo>()
+        val priority4Partial = mutableListOf<AccessibilityNodeInfo>()
+
         val queue = LinkedList<AccessibilityNodeInfo>()
         queue.add(root)
         var inspectedCount = 0
@@ -92,15 +101,21 @@ class AccessibilityAutomationProvider(
             val node = queue.poll() ?: continue
             inspectedCount++
 
-            val text = node.text?.toString() ?: ""
-            val desc = node.contentDescription?.toString() ?: ""
-            val matches = text.contains(trimmed, ignoreCase = true) || desc.contains(trimmed, ignoreCase = true)
+            val text = node.text?.toString()?.trim() ?: ""
+            val desc = node.contentDescription?.toString()?.trim() ?: ""
+            val viewId = node.viewIdResourceName?.trim() ?: ""
 
-            if (matches) {
-                // Find clickable ancestor or self
-                val clickableNode = findClickableTarget(node)
-                if (clickableNode != null && !matchingClickableNodes.contains(clickableNode)) {
-                    matchingClickableNodes.add(clickableNode)
+            val clickableTarget = findClickableTarget(node) ?: if (node.isClickable) node else null
+
+            if (clickableTarget != null) {
+                if (viewId.isNotBlank() && (viewId.equals(trimmed, ignoreCase = true) || viewId.endsWith("/$trimmed", ignoreCase = true))) {
+                    if (!priority1ResourceId.contains(clickableTarget)) priority1ResourceId.add(clickableTarget)
+                } else if (text.equals(trimmed, ignoreCase = true)) {
+                    if (!priority2ExactText.contains(clickableTarget)) priority2ExactText.add(clickableTarget)
+                } else if (desc.equals(trimmed, ignoreCase = true)) {
+                    if (!priority3ExactDesc.contains(clickableTarget)) priority3ExactDesc.add(clickableTarget)
+                } else if (text.contains(trimmed, ignoreCase = true) || desc.contains(trimmed, ignoreCase = true)) {
+                    if (!priority4Partial.contains(clickableTarget)) priority4Partial.add(clickableTarget)
                 }
             }
 
@@ -109,21 +124,33 @@ class AccessibilityAutomationProvider(
             }
         }
 
+        val bestMatches = when {
+            priority1ResourceId.isNotEmpty() -> priority1ResourceId
+            priority2ExactText.isNotEmpty() -> priority2ExactText
+            priority3ExactDesc.isNotEmpty() -> priority3ExactDesc
+            priority4Partial.isNotEmpty() -> priority4Partial
+            else -> emptyList()
+        }
+
         return when {
-            matchingClickableNodes.isEmpty() -> {
+            bestMatches.isEmpty() -> {
                 ToolResult(
                     success = false,
                     message = "No visible clickable element matching '$targetText' was found."
                 )
             }
-            matchingClickableNodes.size > 1 -> {
+            bestMatches.size > 1 -> {
+                val candidateLabels = bestMatches.take(4).mapNotNull {
+                    it.text?.toString() ?: it.contentDescription?.toString() ?: it.viewIdResourceName
+                }
                 ToolResult(
                     success = false,
-                    message = "Multiple visible controls match '$targetText'."
+                    message = "Multiple visible controls match '$targetText'.",
+                    data = mapOf("isAmbiguous" to true, "candidates" to candidateLabels)
                 )
             }
             else -> {
-                val targetNode = matchingClickableNodes[0]
+                val targetNode = bestMatches[0]
                 val performed = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 if (performed) {
                     ToolResult(success = true, message = "Clicked $targetText.")
@@ -168,6 +195,9 @@ class AccessibilityAutomationProvider(
 
         val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             ?: findFocusedEditableNode(root)
+            ?: findAnyEditableNode(root)?.also {
+                it.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            }
 
         if (focusedNode == null) {
             return ToolResult(
@@ -301,6 +331,25 @@ class AccessibilityAutomationProvider(
             count++
 
             if (node.isFocused && node.isEditable) {
+                return node
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+        return null
+    }
+
+    private fun findAnyEditableNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val queue = LinkedList<AccessibilityNodeInfo>()
+        queue.add(root)
+        var count = 0
+
+        while (queue.isNotEmpty() && count < MAX_NODES_INSPECTED) {
+            val node = queue.poll() ?: continue
+            count++
+
+            if (node.isEditable && !node.isPassword) {
                 return node
             }
             for (i in 0 until node.childCount) {

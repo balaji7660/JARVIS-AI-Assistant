@@ -34,6 +34,8 @@ class LocalWakeWordDetector(
 
     private var lastDetectionTimeMs: Long = 0L
     private var isCommandActive: Boolean = false
+    @Volatile
+    private var isSpeaking: Boolean = false
 
     private var audioController: WakeWordAudioController? = null
 
@@ -73,10 +75,26 @@ class LocalWakeWordDetector(
     }
 
     /**
+     * Suppresses wake-word detection while Text-To-Speech is speaking to prevent false activations.
+     */
+    @Synchronized
+    fun suppressDuringSpeech(speaking: Boolean) {
+        isSpeaking = speaking
+        if (speaking) {
+            audioController?.stopCapture()
+        }
+    }
+
+    /**
      * Starts the wake-word detector, opening the microphone and listening locally for "Hey JARVIS".
      */
     @Synchronized
     override fun start() {
+        if (isSpeaking) {
+            Log.d(TAG, "Cannot start wake-word detector while TTS is speaking.")
+            return
+        }
+
         if (_state.value == WakeWordState.LISTENING || _state.value == WakeWordState.STARTING) {
             Log.d(TAG, "Wake-word detector already active or starting.")
             return
@@ -137,7 +155,7 @@ class LocalWakeWordDetector(
     @Synchronized
     fun notifyCommandFinished() {
         isCommandActive = false
-        if (_state.value == WakeWordState.COMMAND_LISTENING) {
+        if (_state.value == WakeWordState.COMMAND_LISTENING && !isSpeaking) {
             start()
         }
     }
@@ -146,7 +164,7 @@ class LocalWakeWordDetector(
      * Ingests an audio frame from the audio controller and scores it with the local engine.
      */
     fun processAudioFrame(buffer: ShortArray, length: Int) {
-        if (_state.value != WakeWordState.LISTENING || isCommandActive) {
+        if (_state.value != WakeWordState.LISTENING || isCommandActive || isSpeaking) {
             return
         }
 

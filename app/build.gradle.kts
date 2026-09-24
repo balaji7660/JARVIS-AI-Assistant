@@ -20,6 +20,9 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        buildConfigField("String", "BASE_URL", "\"https://jarvis-ai-assistant-qvzy.onrender.com/\"")
+        buildConfigField("String", "LOCAL_DEV_BASE_URL", "\"http://10.0.2.2:3000/\"")
     }
 
     buildTypes {
@@ -29,9 +32,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            buildConfigField("String", "BASE_URL", "\"https://jarvis-ai-assistant-qvzy.onrender.com/\"")
         }
         debug {
             isMinifyEnabled = false
+            buildConfigField("String", "BASE_URL", "\"https://jarvis-ai-assistant-qvzy.onrender.com/\"")
         }
     }
 
@@ -46,6 +51,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

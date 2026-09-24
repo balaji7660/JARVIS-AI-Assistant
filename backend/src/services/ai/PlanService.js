@@ -1,5 +1,8 @@
 import { OpenAI } from 'openai';
 import { APPROVED_TOOL_NAMES } from './tools.js';
+import { OllamaProvider } from './OllamaProvider.js';
+import { PuterProvider } from './PuterProvider.js';
+import { getActiveProviderName } from './providerFactory.js';
 
 export const PLANNER_SYSTEM_PROMPT = `You are JARVIS's Autonomous Task Planner.
 Your job is to convert the user's high-level Android automation request into a minimal, bounded, structured sequence of verifiable steps.
@@ -56,10 +59,23 @@ Allowed actions:
 - Keep the plan minimal. Do not add redundant steps.`;
 
 export class PlanService {
-  constructor({ apiKey = process.env.OPENAI_API_KEY, model = process.env.OPENAI_MODEL || 'gpt-4o-mini', client = null } = {}) {
+  /**
+   * @param {Object} [options]
+   * @param {import('./AIProvider.js').AIProvider} [options.aiProvider]
+   * @param {string} [options.apiKey]
+   * @param {string} [options.model]
+   * @param {OpenAI} [options.client]
+   */
+  constructor({
+    aiProvider = null,
+    apiKey = process.env.OPENAI_API_KEY,
+    model = null,
+    client = null
+  } = {}) {
+    this.aiProvider = aiProvider;
     this.apiKey = apiKey;
-    this.model = model;
-    this.client = client || (apiKey && apiKey !== 'your_key_here' ? new OpenAI({ apiKey }) : null);
+    this.model = model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    this.client = client;
   }
 
   /**
@@ -78,14 +94,15 @@ export class PlanService {
     }
 
     const trimmedPrompt = prompt.trim();
-
-    // Check offline / local deterministic templates first or if OpenAI is unconfigured
-    if (!this.client && (!this.apiKey || this.apiKey === 'your_key_here')) {
-      return this.generateDeterministicPlan(trimmedPrompt, { memoryContext, currentPackage, visibleScreenText, context });
-    }
-
-    if (!this.client) {
-      this.client = new OpenAI({ apiKey: this.apiKey });
+    let activeProvider = getActiveProviderName();
+    if (this.aiProvider) {
+      if (this.aiProvider instanceof PuterProvider) {
+        activeProvider = 'puter';
+      } else if (this.aiProvider instanceof OllamaProvider) {
+        activeProvider = 'ollama';
+      } else {
+        activeProvider = 'openai';
+      }
     }
 
     const contextSection = context ? `
@@ -101,6 +118,93 @@ Context:
 Current Foreground Package: ${currentPackage || 'Unknown'}
 Visible Screen Context: ${visibleScreenText || 'None'}
 User Memory Context: ${memoryContext || 'None'}${contextSection}`;
+
+    // 1. Puter Provider branch (Zero OpenAI / Zero Ollama involvement)
+    if (activeProvider === 'puter') {
+      const puter = this.aiProvider instanceof PuterProvider ? this.aiProvider : new PuterProvider();
+      try {
+        const client = await puter._getPuterClient();
+        const messages = [
+          { role: 'system', content: PLANNER_SYSTEM_PROMPT },
+          { role: 'user', content: userMessageContent }
+        ];
+
+        const chatFn = client.ai?.chat?.bind(client.ai) || client.chat?.bind(client);
+        if (!chatFn) {
+          throw new Error('Puter AI chat interface unavailable.');
+        }
+
+        const response = await puter._withTimeout(
+          chatFn(messages, {
+            model: puter.model,
+            stream: false
+          }),
+          puter.timeoutMs
+        );
+
+        const content = response.message?.content || response.text || (typeof response === 'string' ? response : null);
+        if (!content) {
+          throw new Error('Empty plan content returned from Puter.');
+        }
+
+        const cleaned = content.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
+        const parsedPlan = JSON.parse(cleaned);
+        return this.sanitizeAndValidatePlan(parsedPlan, trimmedPrompt);
+      } catch (err) {
+        console.warn(`[PlanService - Puter] Error: ${err.message}. Falling back to deterministic plan.`);
+        return this.generateDeterministicPlan(trimmedPrompt, { memoryContext, currentPackage, visibleScreenText, context });
+      }
+    }
+
+    // 2. Ollama Provider branch (Zero OpenAI involvement)
+    if (activeProvider === 'ollama') {
+
+      const ollama = this.aiProvider instanceof OllamaProvider ? this.aiProvider : new OllamaProvider();
+      try {
+        const response = await ollama._safeFetch(`${ollama.baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: ollama.model,
+            messages: [
+              { role: 'system', content: PLANNER_SYSTEM_PROMPT },
+              { role: 'user', content: userMessageContent }
+            ],
+            stream: false,
+            format: 'json',
+            options: {
+              temperature: 0.2,
+              num_predict: 600
+            }
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Ollama plan generation failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const content = data.message?.content;
+        if (!content) {
+          throw new Error('Empty plan content returned from Ollama.');
+        }
+
+        const parsedPlan = JSON.parse(content);
+        return this.sanitizeAndValidatePlan(parsedPlan, trimmedPrompt);
+      } catch (err) {
+        console.warn(`[PlanService - Ollama] Error: ${err.message}. Falling back to deterministic plan.`);
+        return this.generateDeterministicPlan(trimmedPrompt, { memoryContext, currentPackage, visibleScreenText, context });
+      }
+    }
+
+    // 2. OpenAI Provider branch
+    if (!this.client && (!this.apiKey || this.apiKey === 'your_key_here')) {
+      return this.generateDeterministicPlan(trimmedPrompt, { memoryContext, currentPackage, visibleScreenText, context });
+    }
+
+    if (!this.client) {
+      this.client = new OpenAI({ apiKey: this.apiKey });
+    }
 
     try {
       const response = await this.client.chat.completions.create({

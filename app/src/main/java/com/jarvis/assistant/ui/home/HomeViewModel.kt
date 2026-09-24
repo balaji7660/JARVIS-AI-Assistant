@@ -78,6 +78,7 @@ class HomeViewModel @JvmOverloads constructor(
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     private var resetJob: Job? = null
+    private var speechWatchdogJob: Job? = null
 
     val effectiveContextManager: com.jarvis.assistant.context.ConversationContextManager =
         conversationContextManager ?: com.jarvis.assistant.context.ConversationContextManager()
@@ -196,7 +197,7 @@ class HomeViewModel @JvmOverloads constructor(
                 }
             }
         },
-        fallbackEngine = LocalResponseEngine(toolRouter = effectiveToolRouter)
+        fallbackEngine = null
     )
 
     init {
@@ -385,23 +386,37 @@ class HomeViewModel @JvmOverloads constructor(
         when (_uiState.value.state) {
             AssistantState.LISTENING -> {
                 speechRecognizerManager?.cancel()
+                val nextState = if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
+                val nextMsg = if (_uiState.value.isWakeWordEnabled) "Listening locally for \"Hey JARVIS\"..." else "Ready, boss."
                 _uiState.update {
                     it.copy(
-                        state = AssistantState.IDLE,
-                        statusMessage = "Ready, boss.",
+                        state = nextState,
+                        statusMessage = nextMsg,
                         isMicActive = false
                     )
+                }
+                if (_uiState.value.isWakeWordEnabled) {
+                    (effectiveWakeWordDetector as? LocalWakeWordDetector)?.notifyCommandFinished()
                 }
             }
             AssistantState.SPEAKING, AssistantState.EXECUTING -> {
                 ttsManager?.stop()
+                speechWatchdogJob?.cancel()
+                speechWatchdogJob = null
+                effectiveTaskExecutor.cancel()
+                (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(false)
+                val nextState = if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
+                val nextMsg = if (_uiState.value.isWakeWordEnabled) "Listening locally for \"Hey JARVIS\"..." else "Ready, boss."
                 _uiState.update {
                     it.copy(
-                        state = AssistantState.IDLE,
-                        statusMessage = "Ready, boss.",
+                        state = nextState,
+                        statusMessage = nextMsg,
                         isMicActive = false,
                         activeToolName = null
                     )
+                }
+                if (_uiState.value.isWakeWordEnabled) {
+                    effectiveWakeWordDetector.start()
                 }
             }
             else -> {
@@ -442,6 +457,7 @@ class HomeViewModel @JvmOverloads constructor(
 
     private fun startVoiceInput() {
         refreshAccessibilityStatus()
+        (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(false)
         if (effectiveWakeWordDetector is LocalWakeWordDetector) {
             effectiveWakeWordDetector.notifyCommandListeningStarted()
         } else {
@@ -579,8 +595,8 @@ class HomeViewModel @JvmOverloads constructor(
                 return@launch
             }
 
-            // Simulated brief thinking delay for UI feedback
-            delay(350)
+            // Brief suspension to yield coroutine so UI observes THINKING state
+            delay(50)
 
             // Direct Type Text command requires confirmation before any screen scraping
             if (isTypeTextQuery(text)) {
@@ -811,6 +827,11 @@ class HomeViewModel @JvmOverloads constructor(
     }
 
     private fun speakMessage(message: String) {
+        // Temporarily suppress wake-word detection while speaking so TTS never triggers the detector
+        (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(true)
+        speechRecognizerManager?.cancel()
+        speechWatchdogJob?.cancel()
+
         _uiState.update {
             it.copy(
                 responseText = message,
@@ -820,8 +841,23 @@ class HomeViewModel @JvmOverloads constructor(
             )
         }
 
+        val wordCount = message.split(Regex("\\s+")).filter { it.isNotBlank() }.size
+        val watchdogTimeoutMs = maxOf(3500L, (wordCount * 550L) + 2500L)
+        speechWatchdogJob = viewModelScope.launch {
+            delay(watchdogTimeoutMs)
+            if (_uiState.value.state == AssistantState.SPEAKING) {
+                completeSpeechPlayback()
+            }
+        }
+
         if (ttsManager?.isReady == true) {
-            ttsManager?.speak(message)
+            val spoken = ttsManager?.speak(message) ?: false
+            if (!spoken) {
+                viewModelScope.launch {
+                    delay(1500)
+                    completeSpeechPlayback()
+                }
+            }
         } else {
             viewModelScope.launch {
                 delay(2000)
@@ -835,6 +871,8 @@ class HomeViewModel @JvmOverloads constructor(
         category: MemoryCategory,
         onConfirmSave: () -> Unit
     ) {
+        (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(true)
+        speechRecognizerManager?.cancel()
         val categoryLabel = category.name.lowercase().replace('_', ' ')
         val promptSpeech = "Shall I store this in your $categoryLabel memory, boss?"
 
@@ -927,6 +965,8 @@ class HomeViewModel @JvmOverloads constructor(
         arguments: Map<String, Any?> = emptyMap(),
         onConfirmAction: () -> Unit
     ) {
+        (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(true)
+        speechRecognizerManager?.cancel()
         val promptSpeech = "I'm ready to ${description.lowercase()} Shall I proceed, boss?"
 
         _uiState.update {
@@ -1160,14 +1200,27 @@ class HomeViewModel @JvmOverloads constructor(
     }
 
     private fun handleVoiceError(errorMessage: String) {
-        speechRecognizerManager?.stopListening()
+        speechRecognizerManager?.cancel()
         ttsManager?.stop()
+
+        val isSilentTimeout = errorMessage.contains("No speech", ignoreCase = true)
+        val displayMsg = if (isSilentTimeout) {
+            if (_uiState.value.isWakeWordEnabled) "Listening locally for \"Hey JARVIS\"..." else "Ready, boss."
+        } else {
+            errorMessage
+        }
+
+        val nextState = if (isSilentTimeout) {
+            if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
+        } else {
+            AssistantState.ERROR
+        }
 
         _uiState.update {
             it.copy(
-                state = AssistantState.ERROR,
-                statusMessage = errorMessage,
-                errorMessage = errorMessage,
+                state = nextState,
+                statusMessage = displayMsg,
+                errorMessage = if (isSilentTimeout) null else errorMessage,
                 isMicActive = false,
                 activeToolName = null,
                 pendingConfirmation = null,
@@ -1175,14 +1228,23 @@ class HomeViewModel @JvmOverloads constructor(
             )
         }
 
-        resetJob?.cancel()
-        resetJob = viewModelScope.launch {
-            delay(3000)
-            completeSpeechPlayback()
+        if (isSilentTimeout) {
+            if (_uiState.value.isWakeWordEnabled) {
+                (effectiveWakeWordDetector as? LocalWakeWordDetector)?.notifyCommandFinished()
+            }
+        } else {
+            resetJob?.cancel()
+            resetJob = viewModelScope.launch {
+                delay(3000)
+                completeSpeechPlayback()
+            }
         }
     }
 
     fun completeSpeechPlayback() {
+        speechWatchdogJob?.cancel()
+        speechWatchdogJob = null
+        (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(false)
         val nextState = if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
         val nextMessage = if (_uiState.value.isWakeWordEnabled) "Listening locally for \"Hey JARVIS\"..." else "Ready, boss."
 
@@ -1236,6 +1298,7 @@ class HomeViewModel @JvmOverloads constructor(
 
     public override fun onCleared() {
         super.onCleared()
+        speechWatchdogJob?.cancel()
         com.jarvis.assistant.overlay.JarvisOverlayController.unregisterBridge()
         resetJob?.cancel()
         if (effectiveWakeWordDetector is LocalWakeWordDetector) {

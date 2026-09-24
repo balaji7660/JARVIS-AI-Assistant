@@ -109,16 +109,16 @@ class OpenAIResponseEngineTest {
     }
 
     @Test
-    fun backendMissingApiKey503_returnsApiKeyErrorNotice() = runTest {
+    fun backendServiceUnavailable503_returnsErrorNotice() = runTest {
         mockWebServer.enqueue(
             MockResponse()
                 .setResponseCode(503)
                 .setHeader("Content-Type", "application/json")
-                .setBody("""{"error":"OPENAI_API_KEY is not configured on the server."}""")
+                .setBody("""{"error":"AI backend is currently unavailable."}""")
         )
 
         val response = engine.generateResponse("Hello")
-        assertEquals(OpenAIResponseEngine.ERROR_API_KEY, response)
+        assertEquals(OpenAIResponseEngine.ERROR_BACKEND_UNAVAILABLE, response)
     }
 
     @Test

@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai';
 import { AIProvider } from './AIProvider.js';
+import { AIProviderCapabilities } from './AIProviderCapabilities.js';
 import { JARVIS_TOOLS, APPROVED_TOOL_NAMES } from './tools.js';
 
 export const JARVIS_SYSTEM_PROMPT = `You are JARVIS, an advanced personal AI assistant.
@@ -42,6 +43,25 @@ export class OpenAIProvider extends AIProvider {
     this.apiKey = apiKey;
     this.model = model;
     this.client = client || (apiKey && apiKey !== 'your_key_here' ? new OpenAI({ apiKey }) : null);
+  }
+
+  get capabilities() {
+    return new AIProviderCapabilities({
+      supportsToolCalling: true,
+      supportsStructuredOutput: true,
+      supportsVision: true,
+      supportsStreaming: false
+    });
+  }
+
+  async checkHealth() {
+    const isKeyConfigured = Boolean(this.apiKey && this.apiKey !== 'your_key_here');
+    return {
+      available: isKeyConfigured,
+      provider: 'openai',
+      model: this.model,
+      ...(isKeyConfigured ? {} : { error: 'OPENAI_API_KEY is not configured.' })
+    };
   }
 
   /**

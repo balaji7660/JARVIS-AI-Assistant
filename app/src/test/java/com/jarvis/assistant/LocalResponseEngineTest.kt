@@ -54,10 +54,10 @@ class LocalResponseEngineTest {
 
     @Test
     fun unknownCommand_returnsNextMilestoneFallback() = runTest {
-        val expected = "I heard you, boss. I'm currently operating in on-device mode. To enable full GPT cloud AI responses, ensure your OPENAI_API_KEY is configured on your Render server."
+        val expected = "JARVIS backend is currently unavailable. Please try again."
         assertEquals(
             expected,
-            engine.generateResponse("Open YouTube")
+            engine.generateResponse("Play some music")
         )
         assertEquals(
             expected,

@@ -6,6 +6,8 @@ WORKDIR /app
 # Set production environment
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV AI_PROVIDER=puter
+ENV PUTER_MODEL=gpt-4o
 
 # Install production dependencies
 COPY package*.json ./

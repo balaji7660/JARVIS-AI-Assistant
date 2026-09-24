@@ -31,5 +31,8 @@ data class ChatResponse(
     val sessionId: String = "",
 
     @SerializedName("toolCall")
-    val toolCall: RemoteToolCall? = null
+    val toolCall: RemoteToolCall? = null,
+
+    @SerializedName("timing")
+    val timing: Map<String, Any?>? = null
 )

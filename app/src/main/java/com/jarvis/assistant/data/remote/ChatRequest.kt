@@ -26,5 +26,8 @@ data class ChatRequest(
     val toolCallId: String? = null,
 
     @SerializedName("toolName")
-    val toolName: String? = null
+    val toolName: String? = null,
+
+    @SerializedName("clientTimestamp")
+    val clientTimestamp: Long? = null
 )

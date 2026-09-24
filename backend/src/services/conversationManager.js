@@ -22,16 +22,17 @@ export class ConversationManager {
   /**
    * Adds a message to session history and trims to sliding window
    * @param {string} sessionId
-   * @param {'user'|'assistant'} role
+   * @param {'user'|'assistant'|'tool'} role
    * @param {string} content
+   * @param {Object} [extra]
    */
-  addMessage(sessionId = 'default', role, content) {
+  addMessage(sessionId = 'default', role, content, extra = {}) {
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, []);
     }
 
     const history = this.sessions.get(sessionId);
-    history.push({ role, content });
+    history.push({ role, content, ...extra });
 
     // Enforce sliding window limit
     if (history.length > this.maxHistory) {

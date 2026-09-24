@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <!-- Global base configuration: Enforce HTTPS / TLS without global cleartext -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Permit cleartext traffic only for local development loopback domains -->
     <domain-config cleartextTrafficPermitted="true">
         <!-- Android Emulator loopback alias for host localhost -->
         <domain includeSubdomains="true">10.0.2.2</domain>

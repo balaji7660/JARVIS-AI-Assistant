@@ -9,13 +9,15 @@ export function createChatRouter(aiProvider, conversationManager) {
   const router = Router();
 
   router.post('/chat', async (req, res) => {
+    const t2 = Date.now();
     try {
       const {
         message,
         sessionId = 'default',
         toolResult,
         toolCallId,
-        toolName
+        toolName,
+        clientTimestamp
       } = req.body || {};
 
       // 1. Tool execution result follow-up
@@ -33,15 +35,28 @@ export function createChatRouter(aiProvider, conversationManager) {
           }
         ];
 
+        const t3 = Date.now();
         const aiResult = await aiProvider.generateResponse(messages);
+        const t4 = Date.now();
         const reply = typeof aiResult === 'string' ? aiResult : (aiResult.reply || 'Action completed, boss.');
 
-        conversationManager.addMessage(sessionId, 'tool', toolContent);
+        conversationManager.addMessage(sessionId, 'tool', toolContent, {
+          tool_call_id: toolCallId || 'call_default'
+        });
         conversationManager.addMessage(sessionId, 'assistant', reply);
+
+        console.log(`[JARVIS Pipeline] Follow-up Puter Latency: ${t4 - t3}ms | Total Backend: ${Date.now() - t2}ms`);
 
         return res.status(200).json({
           reply,
-          sessionId
+          sessionId,
+          timing: {
+            t2_backendReceivedMs: t2,
+            t3_puterStartedMs: t3,
+            t4_puterReceivedMs: t4,
+            puterLatencyMs: t4 - t3,
+            backendProcessingMs: Date.now() - t2
+          }
         });
       }
 
@@ -60,7 +75,9 @@ export function createChatRouter(aiProvider, conversationManager) {
         { role: 'user', content: trimmedMessage }
       ];
 
+      const t3 = Date.now();
       const aiResult = await aiProvider.generateResponse(messages);
+      const t4 = Date.now();
 
       let reply = null;
       let toolCall = null;
@@ -72,19 +89,94 @@ export function createChatRouter(aiProvider, conversationManager) {
         toolCall = aiResult.toolCall || null;
       }
 
+      const t5 = toolCall ? Date.now() : null;
+
       // Record in conversation memory
       conversationManager.addMessage(sessionId, 'user', trimmedMessage);
-      if (reply) {
+      if (toolCall) {
+        conversationManager.addMessage(sessionId, 'assistant', reply || '', {
+          tool_calls: [
+            {
+              id: toolCall.id,
+              type: 'function',
+              function: {
+                name: toolCall.name,
+                arguments: typeof toolCall.arguments === 'object'
+                  ? JSON.stringify(toolCall.arguments)
+                  : String(toolCall.arguments || '{}')
+              }
+            }
+          ]
+        });
+      } else if (reply) {
         conversationManager.addMessage(sessionId, 'assistant', reply);
       }
+
+      console.log(`[JARVIS Pipeline] Puter Latency: ${t4 - t3}ms | Total Backend: ${Date.now() - t2}ms${toolCall ? ` | Tool: ${toolCall.name}` : ''}`);
 
       return res.status(200).json({
         reply,
         toolCall,
-        sessionId
+        sessionId,
+        timing: {
+          t2_backendReceivedMs: t2,
+          t3_puterStartedMs: t3,
+          t4_puterReceivedMs: t4,
+          t5_toolDetectedMs: t5,
+          puterLatencyMs: t4 - t3,
+          backendProcessingMs: Date.now() - t2
+        }
       });
     } catch (error) {
       console.error('[Chat API Error]:', error.message);
+      if (error.stack) {
+        console.error('[Chat API Error Stack]:', error.stack);
+      }
+
+      // Puter AI error handling (NEVER silently fall back to OpenAI or Ollama)
+      if (error.message?.includes('PUTER_AUTH_TOKEN is not configured')) {
+        return res.status(503).json({
+          error: 'Puter authentication token is not configured on the server.'
+        });
+      }
+
+      if (error.code === 'EAUTH' || error.message?.includes('Puter authentication failed')) {
+        return res.status(401).json({
+          error: 'Puter authentication failed. Please verify PUTER_AUTH_TOKEN.'
+        });
+      }
+
+      if (
+        error.message?.includes('Puter AI is currently unavailable') ||
+        error.message?.includes('Puter connection')
+      ) {
+        return res.status(503).json({
+          error: 'Puter AI is currently unavailable. Please check the Puter connection.'
+        });
+      }
+
+      if (error.message?.includes('Puter AI request timed out')) {
+        return res.status(504).json({
+          error: 'Puter AI request timed out. Please try again.'
+        });
+      }
+
+      // Explicit local AI unavailable handling (NEVER silently fall back to OpenAI)
+      if (
+        error.message?.includes('Local AI is unavailable') ||
+        error.code === 'ECONNREFUSED' ||
+        error.message?.includes('ECONNREFUSED')
+      ) {
+        return res.status(503).json({
+          error: 'Local AI is unavailable. Start Ollama and try again.'
+        });
+      }
+
+      if (error.code === 'ETIMEDOUT' || error.message?.includes('timed out')) {
+        return res.status(504).json({
+          error: 'AI request timed out. Please try again.'
+        });
+      }
 
       if (error.message?.includes('OPENAI_API_KEY')) {
         return res.status(503).json({
@@ -95,6 +187,7 @@ export function createChatRouter(aiProvider, conversationManager) {
       return res.status(500).json({
         error: "Boss, I'm having trouble connecting to my AI service right now."
       });
+
     }
   });
 

@@ -67,7 +67,7 @@ class LocalResponseEngine(
                 "I am your JARVIS AI assistant, boss. I can automate apps, open settings, navigate your screen, answer questions, and manage tasks."
             }
             else -> {
-                "I heard you, boss. I'm currently operating in on-device mode. To enable full GPT cloud AI responses, ensure your OPENAI_API_KEY is configured on your Render server."
+                "JARVIS backend is currently unavailable. Please try again."
             }
         }
     }
