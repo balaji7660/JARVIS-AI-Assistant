@@ -11,6 +11,23 @@ export function createChatRouter(aiProvider, conversationManager) {
   router.post('/chat', async (req, res) => {
     const t2 = Date.now();
     try {
+      // Safe diagnostic logging (TASK 3)
+      console.log('[Chat API Diagnostic]', {
+        bodyType: typeof req.body,
+        bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : [],
+        messageType: typeof req.body?.message,
+        sessionIdType: typeof req.body?.sessionId,
+        clientTimestampType: typeof req.body?.clientTimestamp
+      });
+
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({
+          error: 'Invalid request: Request body must be a JSON object.',
+          field: 'body',
+          message: 'Request body must be a valid JSON object.'
+        });
+      }
+
       const {
         message,
         sessionId = 'default',
@@ -18,7 +35,24 @@ export function createChatRouter(aiProvider, conversationManager) {
         toolCallId,
         toolName,
         clientTimestamp
-      } = req.body || {};
+      } = req.body;
+
+      // Validate optional fields
+      if (sessionId !== undefined && typeof sessionId !== 'string') {
+        return res.status(400).json({
+          error: 'Invalid request: sessionId must be a string.',
+          field: 'sessionId',
+          message: 'sessionId must be a string if provided.'
+        });
+      }
+
+      if (clientTimestamp !== undefined && clientTimestamp !== null && typeof clientTimestamp !== 'number') {
+        return res.status(400).json({
+          error: 'Invalid request: clientTimestamp must be a number.',
+          field: 'clientTimestamp',
+          message: 'clientTimestamp must be a number if provided.'
+        });
+      }
 
       // 1. Tool execution result follow-up
       if (toolResult !== undefined) {
@@ -63,7 +97,9 @@ export function createChatRouter(aiProvider, conversationManager) {
       // 2. Standard user prompt
       if (!message || typeof message !== 'string' || !message.trim()) {
         return res.status(400).json({
-          error: 'Message is required and cannot be empty.'
+          error: 'Message is required and cannot be empty.',
+          field: 'message',
+          message: 'Message is required and cannot be empty.'
         });
       }
 

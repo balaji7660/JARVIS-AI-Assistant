@@ -24,7 +24,23 @@ export function createApp({
     : (resolvedAiProvider instanceof OllamaProvider ? 'ollama' : getActiveProviderName());
 
   app.use(cors());
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({
+    limit: '10mb',
+    type: ['application/json', 'application/*+json', 'text/plain']
+  }));
+
+  // Gracefully handle malformed JSON syntax errors with structured JSON response (TASK 6)
+  app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+      console.warn('[Express] Malformed JSON rejected:', err.message);
+      return res.status(400).json({
+        error: 'Invalid request: Malformed JSON in request body.',
+        field: 'body',
+        message: 'Malformed JSON in request body. Ensure valid JSON syntax.'
+      });
+    }
+    next(err);
+  });
 
   // Root route
   app.get('/', (req, res) => {
