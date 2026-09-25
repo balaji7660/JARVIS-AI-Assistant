@@ -89,7 +89,8 @@ async function runPhasesVerification() {
     });
     const chatData = await chat.json();
     assert.equal(chat.status, 503);
-    assert.ok(chatData.error?.includes('Puter authentication token is not configured'));
+    const errText = typeof chatData.error === 'string' ? chatData.error : (chatData.error?.message || '');
+    assert.ok(errText.includes('Puter authentication token is not configured'));
     console.log('✅ Puter Provider: Isolated, health=200, zero-fallback=verified (HTTP 503).');
 
     await new Promise(r => srvPuter.close(r));

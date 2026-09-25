@@ -45,31 +45,34 @@ fun JarvisOrb(
     // Dynamic animation specs tailored to assistant state
     val pulseDuration = when (state) {
         AssistantState.IDLE -> 3000
-        AssistantState.WAKE_LISTENING -> 2200
-        AssistantState.LISTENING -> 1100
-        AssistantState.THINKING -> 650
+        AssistantState.PASSIVE_WAKE, AssistantState.WAKE_LISTENING -> 2200
+        AssistantState.ACTIVE_LISTENING, AssistantState.LISTENING -> 1100
+        AssistantState.PROCESSING, AssistantState.THINKING -> 650
         AssistantState.SPEAKING -> 850
         AssistantState.EXECUTING -> 1000
+        AssistantState.WAITING_FOR_CONFIRMATION, AssistantState.WAITING_FOR_CLARIFICATION -> 1500
         AssistantState.ERROR -> 1400
     }
 
     val rotationDurationOuter = when (state) {
         AssistantState.IDLE -> 16000
-        AssistantState.WAKE_LISTENING -> 12000
-        AssistantState.LISTENING -> 5000
-        AssistantState.THINKING -> 2200
+        AssistantState.PASSIVE_WAKE, AssistantState.WAKE_LISTENING -> 12000
+        AssistantState.ACTIVE_LISTENING, AssistantState.LISTENING -> 5000
+        AssistantState.PROCESSING, AssistantState.THINKING -> 2200
         AssistantState.SPEAKING -> 4500
         AssistantState.EXECUTING -> 3500
+        AssistantState.WAITING_FOR_CONFIRMATION, AssistantState.WAITING_FOR_CLARIFICATION -> 6000
         AssistantState.ERROR -> 12000
     }
 
     val rotationDurationInner = when (state) {
         AssistantState.IDLE -> 12000
-        AssistantState.WAKE_LISTENING -> 8000
-        AssistantState.LISTENING -> 3500
-        AssistantState.THINKING -> 1800
+        AssistantState.PASSIVE_WAKE, AssistantState.WAKE_LISTENING -> 8000
+        AssistantState.ACTIVE_LISTENING, AssistantState.LISTENING -> 3500
+        AssistantState.PROCESSING, AssistantState.THINKING -> 1800
         AssistantState.SPEAKING -> 3200
         AssistantState.EXECUTING -> 2500
+        AssistantState.WAITING_FOR_CONFIRMATION, AssistantState.WAITING_FOR_CLARIFICATION -> 4500
         AssistantState.ERROR -> 9000
     }
 
@@ -147,11 +150,13 @@ fun JarvisOrb(
     val primaryColor by animateColorAsState(
         targetValue = when (state) {
             AssistantState.IDLE -> JarvisCyan
-            AssistantState.WAKE_LISTENING -> JarvisCyanBright
-            AssistantState.LISTENING -> JarvisNeonPurple
-            AssistantState.THINKING -> JarvisCyanBright
+            AssistantState.PASSIVE_WAKE, AssistantState.WAKE_LISTENING -> JarvisCyanBright
+            AssistantState.ACTIVE_LISTENING, AssistantState.LISTENING -> JarvisNeonPurple
+            AssistantState.PROCESSING, AssistantState.THINKING -> JarvisCyanBright
             AssistantState.SPEAKING -> JarvisCyan
             AssistantState.EXECUTING -> JarvisGreen
+            AssistantState.WAITING_FOR_CONFIRMATION -> JarvisAmber
+            AssistantState.WAITING_FOR_CLARIFICATION -> JarvisNeonPink
             AssistantState.ERROR -> JarvisRed
         },
         animationSpec = tween(500),
@@ -161,11 +166,13 @@ fun JarvisOrb(
     val secondaryColor by animateColorAsState(
         targetValue = when (state) {
             AssistantState.IDLE -> JarvisBlueLight
-            AssistantState.WAKE_LISTENING -> JarvisCyan
-            AssistantState.LISTENING -> JarvisNeonPink
-            AssistantState.THINKING -> JarvisBlueLight
+            AssistantState.PASSIVE_WAKE, AssistantState.WAKE_LISTENING -> JarvisCyan
+            AssistantState.ACTIVE_LISTENING, AssistantState.LISTENING -> JarvisNeonPink
+            AssistantState.PROCESSING, AssistantState.THINKING -> JarvisBlueLight
             AssistantState.SPEAKING -> JarvisBlueLight
             AssistantState.EXECUTING -> JarvisCyanBright
+            AssistantState.WAITING_FOR_CONFIRMATION -> JarvisCyan
+            AssistantState.WAITING_FOR_CLARIFICATION -> JarvisCyanBright
             AssistantState.ERROR -> JarvisAmber
         },
         animationSpec = tween(500),

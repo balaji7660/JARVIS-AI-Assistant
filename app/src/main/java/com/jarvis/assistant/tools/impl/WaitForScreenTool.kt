@@ -36,7 +36,24 @@ class WaitForScreenTool(
         }
 
         val startTime = System.currentTimeMillis()
-        val pollIntervalMs = 250L
+        val pollIntervalMs = 200L
+
+        // Robust package window synchronization
+        if (!expectedPackage.isNullOrBlank()) {
+            val windowSynced = automationProvider.waitForTargetWindow(expectedPackage, timeoutMs)
+            if (!windowSynced && expectedText.isNullOrBlank()) {
+                val elapsed = System.currentTimeMillis() - startTime
+                val currentPackage = automationProvider.getCurrentPackage()
+                return ToolResult(
+                    success = false,
+                    message = "Timed out after ${elapsed}ms waiting for screen ($expectedPackage / null). Current: '$currentPackage'",
+                    data = mapOf(
+                        "elapsedMs" to elapsed,
+                        "currentPackage" to currentPackage
+                    )
+                )
+            }
+        }
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             var packageMatched = true
@@ -45,7 +62,7 @@ class WaitForScreenTool(
             // Check package
             if (!expectedPackage.isNullOrBlank()) {
                 val currentPkg = automationProvider.getCurrentPackage().lowercase()
-                packageMatched = currentPkg.contains(expectedPackage.lowercase())
+                packageMatched = currentPkg.contains(expectedPackage.lowercase()) || expectedPackage.lowercase().contains(currentPkg)
             }
 
             // Check text

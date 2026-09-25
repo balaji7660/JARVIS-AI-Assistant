@@ -318,11 +318,11 @@ User Memory Context: ${memoryContext || 'None'}${contextSection}`;
         steps.push({
           stepId: 3,
           action: 'wait_for_screen',
-          arguments: { expectedPackage: 'com.google.android.youtube', timeoutMs: 3000 },
+          arguments: { expectedPackage: 'com.google.android.youtube', timeoutMs: 7000 },
           expectedResult: { expectedScreenState: 'YouTube search results active' },
           riskLevel: 'LOW',
           requiresConfirmation: false,
-          timeoutMs: 3000,
+          timeoutMs: 7000,
           retryCount: 1
         });
       }
@@ -352,11 +352,11 @@ User Memory Context: ${memoryContext || 'None'}${contextSection}`;
       steps.push({
         stepId: 2,
         action: 'wait_for_screen',
-        arguments: { expectedPackage: pkgName || '', timeoutMs: 3000 },
+        arguments: { expectedPackage: pkgName || '', timeoutMs: 7000 },
         expectedResult: { expectedScreenState: `${appName} screen active` },
         riskLevel: 'LOW',
         requiresConfirmation: false,
-        timeoutMs: 3000,
+        timeoutMs: 7000,
         retryCount: 1
       });
 

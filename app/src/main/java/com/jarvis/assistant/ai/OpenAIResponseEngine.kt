@@ -2,6 +2,7 @@ package com.jarvis.assistant.ai
 
 import android.util.Log
 import com.jarvis.assistant.data.remote.ApiClient
+import com.jarvis.assistant.data.remote.BackendHealthManager
 import com.jarvis.assistant.data.remote.ChatApiService
 import com.jarvis.assistant.data.remote.ChatRequest
 import com.jarvis.assistant.tools.ToolCall
@@ -9,6 +10,7 @@ import com.jarvis.assistant.tools.ToolResult
 import com.jarvis.assistant.tools.ToolRouter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
@@ -34,7 +36,8 @@ class OpenAIResponseEngine(
     private val toolRouter: ToolRouter? = null,
     private val onToolExecuting: ((String?) -> Unit)? = null,
     private val fallbackEngine: ResponseEngine? = null,
-    private val overallTimeoutMs: Long = DEFAULT_OVERALL_TIMEOUT_MS
+    private val overallTimeoutMs: Long = DEFAULT_OVERALL_TIMEOUT_MS,
+    private val maxRetries: Int = 0
 ) : ResponseEngine {
 
     private fun getApiService(): ChatApiService = chatApiService ?: ApiClient.getChatApiService()
@@ -55,6 +58,19 @@ class OpenAIResponseEngine(
         if (trimmed.isEmpty()) {
             return@withContext fallbackEngine?.generateResponse(prompt)
                 ?: "I didn't catch that, boss. How can I assist you?"
+        }
+
+        // Circuit-breaker check: If cloud is currently marked unavailable, check health first
+        if (!BackendHealthManager.isCloudAvailable()) {
+            val isRecovered = try {
+                BackendHealthManager.checkHealth()
+            } catch (_: Throwable) {
+                false
+            }
+            if (!isRecovered) {
+                return@withContext fallbackEngine?.generateResponse(prompt)
+                    ?: "JARVIS cloud intelligence is temporarily unavailable. Local functions remain ready, boss."
+            }
         }
 
         try {
@@ -81,19 +97,94 @@ class OpenAIResponseEngine(
         "go_home",
         "press_back",
         "get_time",
-        "get_date"
+        "get_date",
+        "call_contact",
+        "get_battery_status",
+        "set_volume",
+        "get_volume",
+        "set_brightness",
+        "get_brightness",
+        "toggle_flashlight",
+        "open_camera",
+        "get_device_info",
+        "get_network_status",
+        "open_wifi_settings",
+        "open_bluetooth_settings",
+        "lock_screen",
+        "play_media",
+        "pause_media",
+        "resume_media",
+        "next_track",
+        "previous_track",
+        "get_media_state",
+        "send_sms",
+        "find_screen_element",
+        "read_current_screen",
+        "diagnose_screen_error",
+        "click_screen_element",
+        "scroll_screen",
+        "search_web",
+        "search_youtube",
+        "read_current_webpage",
+        "summarize_webpage",
+        "create_note",
+        "search_notes",
+        "list_notes",
+        "update_note",
+        "delete_note",
+        "create_timer",
+        "cancel_timer",
+        "list_timers",
+        "create_reminder",
+        "cancel_reminder",
+        "list_reminders",
+        "create_calendar_event",
+        "list_calendar_events",
+        "delete_calendar_event"
     )
+
+    private fun isSafeToRetry(prompt: String): Boolean {
+        val lower = prompt.lowercase()
+        val dangerousKeywords = listOf("send", "call", "delete", "remove", "pay", "buy", "type", "click", "post")
+        return !dangerousKeywords.any { lower.contains(it) }
+    }
 
     private suspend fun executeAutomationLoop(trimmedPrompt: String, originalPrompt: String): String {
         val t1 = System.currentTimeMillis()
+        val canRetry = maxRetries > 0 && isSafeToRetry(trimmedPrompt)
+        val maxAttempts = if (canRetry) (1 + maxRetries) else 1
+        var attempt = 0
+        var response: com.jarvis.assistant.data.remote.ChatResponse? = null
+
         return try {
-            var response = getApiService().sendMessage(
-                ChatRequest(
-                    message = trimmedPrompt,
-                    sessionId = sessionId,
-                    clientTimestamp = t1
-                )
-            )
+            while (attempt < maxAttempts) {
+                attempt++
+                try {
+                    response = getApiService().sendMessage(
+                        ChatRequest(
+                            message = trimmedPrompt,
+                            sessionId = sessionId,
+                            clientTimestamp = t1
+                        )
+                    )
+                    BackendHealthManager.recordSuccess()
+                    break
+                } catch (e: Throwable) {
+                    val failure = BackendHealthManager.classifyFailure(e)
+                    if (attempt < maxAttempts && failure.isRetryable) {
+                        BackendHealthManager.recordRetry()
+                        val backoff = if (attempt == 1) 1000L else 2000L
+                        Log.w(TAG, "Transient network issue ($failure) on attempt $attempt. Retrying in ${backoff}ms...")
+                        delay(backoff)
+                    } else {
+                        throw e
+                    }
+                }
+            }
+
+            if (response == null) {
+                return ERROR_BACKEND_UNAVAILABLE
+            }
 
             val t4 = System.currentTimeMillis()
             val backendMs = response.timing?.get("backendProcessingMs")
@@ -165,6 +256,7 @@ class OpenAIResponseEngine(
                             clientTimestamp = t7Followup
                         )
                     )
+                    BackendHealthManager.recordSuccess()
                     val t8 = System.currentTimeMillis()
                     Log.i(TAG, "[PipelineTiming] Follow-up turn roundtrip (T7->T8): ${t8 - t7Followup}ms")
                     activeTool = response.toolCall
@@ -181,6 +273,7 @@ class OpenAIResponseEngine(
             }
         } catch (e: HttpException) {
             onToolExecuting?.invoke(null)
+            BackendHealthManager.recordFailure(e)
             Log.w(TAG, "HTTP error communicating with backend: ${e.code()}", e)
             when (e.code()) {
                 503 -> ERROR_BACKEND_UNAVAILABLE
@@ -189,14 +282,17 @@ class OpenAIResponseEngine(
             }
         } catch (e: SocketTimeoutException) {
             onToolExecuting?.invoke(null)
+            BackendHealthManager.recordFailure(e)
             Log.w(TAG, "Socket timeout communicating with backend", e)
             ERROR_NETWORK
         } catch (e: IOException) {
             onToolExecuting?.invoke(null)
+            BackendHealthManager.recordFailure(e)
             Log.w(TAG, "Network I/O error communicating with backend", e)
             ERROR_NETWORK
         } catch (e: Exception) {
             onToolExecuting?.invoke(null)
+            BackendHealthManager.recordFailure(e)
             Log.e(TAG, "Unexpected error in OpenAIResponseEngine", e)
             ERROR_UPSTREAM
         }

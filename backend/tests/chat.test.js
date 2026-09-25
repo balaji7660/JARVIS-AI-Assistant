@@ -171,7 +171,7 @@ describe('JARVIS Backend Chat API Tests', () => {
     assert.equal(data.reply, 'The current time is 5:30 PM, boss.');
   });
 
-  test('Approved tool registry contains all 13 base, accessibility, vision, and planning tools', () => {
+  test('Approved tool registry contains all base, accessibility, vision, planning, call, device, media, and sms tools', () => {
     const expected = [
       'get_time',
       'get_date',
@@ -179,15 +179,66 @@ describe('JARVIS Backend Chat API Tests', () => {
       'press_back',
       'open_url',
       'open_app',
+      'call_contact',
       'read_visible_screen',
       'click_text',
       'click_view',
       'type_text',
       'scroll',
       'analyze_current_screen',
-      'wait_for_screen'
+      'wait_for_screen',
+      // Device tools
+      'get_battery_status',
+      'set_volume',
+      'get_volume',
+      'set_brightness',
+      'get_brightness',
+      'toggle_flashlight',
+      'open_camera',
+      'get_device_info',
+      'get_network_status',
+      'open_wifi_settings',
+      'open_bluetooth_settings',
+      'lock_screen',
+      // Media tools
+      'play_media',
+      'pause_media',
+      'resume_media',
+      'next_track',
+      'previous_track',
+      'get_media_state',
+      // SMS
+      'send_sms',
+      // Phase 6: Screen Assistant
+      'find_screen_element',
+      'read_current_screen',
+      'diagnose_screen_error',
+      'click_screen_element',
+      'scroll_screen',
+      // Phase 7: Web Assistant
+      'search_web',
+      'search_youtube',
+      'read_current_webpage',
+      'summarize_webpage',
+      // Phase 8: Local Notes
+      'create_note',
+      'search_notes',
+      'list_notes',
+      'update_note',
+      'delete_note',
+      // Phase 9: Reminders and Timers
+      'create_timer',
+      'cancel_timer',
+      'list_timers',
+      'create_reminder',
+      'cancel_reminder',
+      'list_reminders',
+      // Phase 10: Controlled Calendar
+      'create_calendar_event',
+      'list_calendar_events',
+      'delete_calendar_event'
     ];
-    assert.equal(JARVIS_TOOLS.length, 13);
+    assert.equal(JARVIS_TOOLS.length, 56);
     for (const name of expected) {
       assert.ok(APPROVED_TOOL_NAMES.has(name), `Missing approved tool: ${name}`);
     }

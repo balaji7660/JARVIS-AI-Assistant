@@ -77,14 +77,36 @@ class HomeViewModelTest {
         val registeredNames = viewModel.toolRegistry.getAll().map { it.name }
         val expectedTools = listOf(
             "get_time", "get_date", "go_home", "press_back", "open_url", "open_app",
+            "call_contact",
+            // Device tools
+            "get_battery_status", "set_volume", "get_volume", "set_brightness", "get_brightness",
+            "toggle_flashlight", "open_camera", "get_device_info", "get_network_status",
+            "open_wifi_settings", "open_bluetooth_settings", "lock_screen",
+            // Media tools
+            "play_media", "pause_media", "resume_media", "next_track", "previous_track", "get_media_state",
+            // SMS tool
+            "send_sms",
+            // Accessibility tools
             "read_visible_screen", "click_text", "click_view", "scroll", "type_text",
-            "analyze_current_screen", "wait_for_screen"
+            "analyze_current_screen", "wait_for_screen",
+            // Phase 6: Screen Assistant
+            "find_screen_element", "read_current_screen", "diagnose_screen_error", "click_screen_element", "scroll_screen",
+            // Phase 7: Web Assistant
+            "search_web", "search_youtube", "read_current_webpage", "summarize_webpage",
+            // Phase 8: Local Notes
+            "create_note", "search_notes", "list_notes", "update_note", "delete_note",
+            // Phase 9: Reminders and Timers
+            "create_timer", "cancel_timer", "list_timers", "create_reminder", "cancel_reminder", "list_reminders",
+            // Phase 10: Controlled Calendar
+            "create_calendar_event", "list_calendar_events", "delete_calendar_event",
+            // Reliability Upgrade: WhatsApp
+            "send_whatsapp_message"
         )
 
         for (expected in expectedTools) {
             assertTrue("Expected tool $expected to be registered", registeredNames.contains(expected))
         }
-        assertEquals(13, registeredNames.size)
+        assertEquals(57, registeredNames.size)
     }
 
     @Test

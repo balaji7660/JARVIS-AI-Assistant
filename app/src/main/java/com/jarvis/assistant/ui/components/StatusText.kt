@@ -43,6 +43,7 @@ import com.jarvis.assistant.ui.theme.JarvisBlueLight
 import com.jarvis.assistant.ui.theme.JarvisCyan
 import com.jarvis.assistant.ui.theme.JarvisCyanBright
 import com.jarvis.assistant.ui.theme.JarvisGreen
+import com.jarvis.assistant.ui.theme.JarvisNeonPink
 import com.jarvis.assistant.ui.theme.JarvisNeonPurple
 import com.jarvis.assistant.ui.theme.JarvisRed
 import com.jarvis.assistant.ui.theme.JarvisSurfaceVariant
@@ -73,11 +74,13 @@ fun StatusText(
     val stateColor by animateColorAsState(
         targetValue = when (state) {
             AssistantState.IDLE -> JarvisCyan
-            AssistantState.WAKE_LISTENING -> JarvisCyanBright
-            AssistantState.LISTENING -> JarvisNeonPurple
-            AssistantState.THINKING -> JarvisCyanBright
+            AssistantState.PASSIVE_WAKE, AssistantState.WAKE_LISTENING -> JarvisCyanBright
+            AssistantState.ACTIVE_LISTENING, AssistantState.LISTENING -> JarvisNeonPurple
+            AssistantState.PROCESSING, AssistantState.THINKING -> JarvisCyanBright
             AssistantState.SPEAKING -> JarvisBlueLight
             AssistantState.EXECUTING -> JarvisGreen
+            AssistantState.WAITING_FOR_CONFIRMATION -> JarvisAmber
+            AssistantState.WAITING_FOR_CLARIFICATION -> JarvisNeonPink
             AssistantState.ERROR -> JarvisRed
         },
         animationSpec = tween(400),

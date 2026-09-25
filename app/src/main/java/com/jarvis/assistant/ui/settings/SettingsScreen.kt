@@ -974,6 +974,10 @@ fun SettingsScreen(
                 }
 
                 item {
+                    DeveloperDiagnosticsCard()
+                }
+
+                item {
                     Spacer(modifier = Modifier.height(24.dp))
                     Box(
                         modifier = Modifier.fillMaxWidth(),
@@ -1095,6 +1099,59 @@ private fun SettingsSectionCard(
                     fontSize = 10.sp
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun DeveloperDiagnosticsCard(
+    modifier: Modifier = Modifier
+) {
+    val diag by com.jarvis.assistant.data.remote.BackendHealthManager.diagnostics.collectAsState()
+    val sdf = remember { java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()) }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, JarvisCyan.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = JarvisSurface.copy(alpha = 0.85f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Developer Diagnostics",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Text(
+                    text = diag.state.name,
+                    color = when (diag.state) {
+                        com.jarvis.assistant.data.remote.BackendHealthState.AVAILABLE -> JarvisCyan
+                        com.jarvis.assistant.data.remote.BackendHealthState.DEGRADED -> com.jarvis.assistant.ui.theme.JarvisAmber
+                        else -> com.jarvis.assistant.ui.theme.JarvisRed
+                    },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Backend: ${diag.state.name}", color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            Text("Last Success: ${if (diag.lastSuccessfulRequestTimeMs > 0) sdf.format(java.util.Date(diag.lastSuccessfulRequestTimeMs)) else "None"}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("Last Failed: ${if (diag.lastFailedRequestTimeMs > 0) sdf.format(java.util.Date(diag.lastFailedRequestTimeMs)) else "None"}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("Failure Type: ${diag.lastFailureType?.name ?: "None"}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("Retry Count: ${diag.retryCount}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("Consecutive Failures: ${diag.consecutiveFailures}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("Last Health Check: ${if (diag.lastHealthCheckTimeMs > 0) sdf.format(java.util.Date(diag.lastHealthCheckTimeMs)) else "None"}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("Puter AI: ${if (diag.isPuterConfigured) "configured / available" else "unavailable"}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
         }
     }
 }

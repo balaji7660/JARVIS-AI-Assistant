@@ -84,7 +84,7 @@ async function runLiveVerification() {
 
     if (chatRes.status === 200 && chatData.reply) {
       console.log(`✅ 5. Live /api/chat succeeded: "${chatData.reply}"`);
-    } else if (chatRes.status === 503 && chatData.error?.includes('Puter authentication token is not configured')) {
+    } else if (chatRes.status === 503 && (chatData.error?.message || chatData.error)?.includes?.('Puter authentication token is not configured')) {
       console.log('✅ 5. /api/chat correctly enforced missing token check (HTTP 503):', chatData.error);
       results.chatAuthCheck = true;
     } else {

@@ -25,7 +25,7 @@ class LocalWakeWordDetector(
         private const val TAG = "LocalWakeWordDetector"
     }
 
-    private var listener: WakeWordListener? = null
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<WakeWordListener>()
     private val _state = MutableStateFlow(WakeWordState.DISABLED)
     val state: StateFlow<WakeWordState> = _state.asStateFlow()
 
@@ -71,7 +71,20 @@ class LocalWakeWordDetector(
     }
 
     override fun setListener(listener: WakeWordListener?) {
-        this.listener = listener
+        listeners.clear()
+        if (listener != null) {
+            listeners.add(listener)
+        }
+    }
+
+    fun addListener(listener: WakeWordListener) {
+        if (!listeners.contains(listener)) {
+            listeners.add(listener)
+        }
+    }
+
+    fun removeListener(listener: WakeWordListener) {
+        listeners.remove(listener)
     }
 
     /**
@@ -115,7 +128,9 @@ class LocalWakeWordDetector(
                 transitionTo(WakeWordState.ERROR)
                 val errorMsg = "Failed to start microphone audio capture for wake-word detection."
                 Log.e(TAG, errorMsg)
-                listener?.onWakeWordError(errorMsg)
+                for (l in listeners) {
+                    try { l.onWakeWordError(errorMsg) } catch (t: Throwable) { Log.e(TAG, "Listener error", t) }
+                }
             }
         } else {
             // Fallback for tests/environments without AudioRecord
@@ -193,14 +208,18 @@ class LocalWakeWordDetector(
         // 3. Transition to TRANSITIONING state
         transitionTo(WakeWordState.TRANSITIONING)
 
-        // 4. Notify listener
-        listener?.onWakeWordDetected()
+        // 4. Notify listeners
+        for (l in listeners) {
+            try { l.onWakeWordDetected() } catch (t: Throwable) { Log.e(TAG, "Listener error", t) }
+        }
     }
 
     private fun handleAudioError(error: String) {
         Log.e(TAG, "Audio error in wake-word detector: $error")
         transitionTo(WakeWordState.ERROR)
-        listener?.onWakeWordError(error)
+        for (l in listeners) {
+            try { l.onWakeWordError(error) } catch (t: Throwable) { Log.e(TAG, "Listener error", t) }
+        }
     }
 
     private fun transitionTo(newState: WakeWordState) {
@@ -247,6 +266,6 @@ class LocalWakeWordDetector(
         audioController?.release()
         audioController = null
         engine.release()
-        listener = null
+        listeners.clear()
     }
 }

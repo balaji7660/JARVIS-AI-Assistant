@@ -76,6 +76,60 @@ class OpenAppTool(
         "whatsapp" to listOf(
             "com.whatsapp",
             "com.whatsapp.w4b"
+        ),
+        "instagram" to listOf(
+            "com.instagram.android"
+        ),
+        "spotify" to listOf(
+            "com.spotify.music"
+        ),
+        "telegram" to listOf(
+            "org.telegram.messenger",
+            "org.thunderdog.challegram"
+        ),
+        "netflix" to listOf(
+            "com.netflix.mediaclient"
+        ),
+        "twitter" to listOf(
+            "com.twitter.android"
+        ),
+        "x" to listOf(
+            "com.twitter.android"
+        ),
+        "reddit" to listOf(
+            "com.reddit.frontpage"
+        ),
+        "amazon" to listOf(
+            "com.amazon.mShop.android.shopping"
+        ),
+        "gmail" to listOf(
+            "com.google.android.gm"
+        ),
+        "email" to listOf(
+            "com.google.android.gm"
+        ),
+        "photos" to listOf(
+            "com.google.android.apps.photos",
+            "com.android.gallery3d",
+            "com.sec.android.gallery3d",
+            "com.miui.gallery"
+        ),
+        "gallery" to listOf(
+            "com.google.android.apps.photos",
+            "com.android.gallery3d",
+            "com.sec.android.gallery3d",
+            "com.miui.gallery"
+        ),
+        "files" to listOf(
+            "com.google.android.apps.nbu.files",
+            "com.android.documentsui"
+        ),
+        "play store" to listOf(
+            "com.android.vending"
+        ),
+        "notes" to listOf(
+            "com.google.android.keep",
+            "com.miui.notes"
         )
     )
 
@@ -91,6 +145,7 @@ class OpenAppTool(
         if (clean.startsWith("launch ")) clean = clean.removePrefix("launch ").trim()
         if (clean.startsWith("start ")) clean = clean.removePrefix("start ").trim()
         if (clean.startsWith("the ")) clean = clean.removePrefix("the ").trim()
+        if (clean.startsWith("my ")) clean = clean.removePrefix("my ").trim()
         if (clean.endsWith(" app")) clean = clean.removeSuffix(" app").trim()
         if (clean.endsWith(" application")) clean = clean.removeSuffix(" application").trim()
         return clean.trim()
@@ -261,6 +316,29 @@ class OpenAppTool(
                     launchIntent = Intent(android.provider.Settings.ACTION_SETTINGS)
                     resolvedPackage = "com.android.settings"
                     resolvedLabel = "Settings"
+                }
+                normalized == "camera" || normalized.contains("camera") -> {
+                    launchIntent = Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                    resolvedPackage = "com.android.camera2"
+                    resolvedLabel = "Camera"
+                }
+                normalized == "messages" || normalized == "sms" || normalized.contains("message") -> {
+                    launchIntent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_APP_MESSAGING)
+                    }
+                    resolvedPackage = "com.google.android.apps.messaging"
+                    resolvedLabel = "Messages"
+                }
+                normalized == "gallery" || normalized == "photos" -> {
+                    launchIntent = Intent(Intent.ACTION_MAIN).apply {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
+                            addCategory(Intent.CATEGORY_APP_GALLERY)
+                        } else {
+                            addCategory(Intent.CATEGORY_LAUNCHER)
+                        }
+                    }
+                    resolvedPackage = "com.google.android.apps.photos"
+                    resolvedLabel = "Photos"
                 }
             }
         }

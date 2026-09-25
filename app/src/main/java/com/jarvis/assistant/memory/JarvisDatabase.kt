@@ -6,13 +6,24 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [MemoryEntity::class],
-    version = 1,
+    entities = [
+        MemoryEntity::class,
+        NoteEntity::class,
+        ReminderEntity::class,
+        TimerEntity::class,
+        ConversationEntity::class,
+        MessageEntity::class
+    ],
+    version = 3,
     exportSchema = false
 )
 abstract class JarvisDatabase : RoomDatabase() {
 
     abstract fun memoryDao(): MemoryDao
+    abstract fun noteDao(): NoteDao
+    abstract fun reminderDao(): ReminderDao
+    abstract fun conversationDao(): ConversationDao
+    abstract fun messageDao(): MessageDao
 
     companion object {
         private const val DATABASE_NAME = "jarvis_memory.db"

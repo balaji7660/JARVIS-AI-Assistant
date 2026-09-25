@@ -172,13 +172,23 @@ export function createChatRouter(aiProvider, conversationManager) {
       // Puter AI error handling (NEVER silently fall back to OpenAI or Ollama)
       if (error.message?.includes('PUTER_AUTH_TOKEN is not configured')) {
         return res.status(503).json({
-          error: 'Puter authentication token is not configured on the server.'
+          success: false,
+          error: {
+            code: 'PUTER_AUTH_MISSING',
+            message: 'Puter authentication token is not configured on the server.',
+            retryable: false
+          }
         });
       }
 
       if (error.code === 'EAUTH' || error.message?.includes('Puter authentication failed')) {
         return res.status(401).json({
-          error: 'Puter authentication failed. Please verify PUTER_AUTH_TOKEN.'
+          success: false,
+          error: {
+            code: 'HTTP_401',
+            message: 'Puter authentication failed. Please verify PUTER_AUTH_TOKEN.',
+            retryable: false
+          }
         });
       }
 
@@ -187,13 +197,23 @@ export function createChatRouter(aiProvider, conversationManager) {
         error.message?.includes('Puter connection')
       ) {
         return res.status(503).json({
-          error: 'Puter AI is currently unavailable. Please check the Puter connection.'
+          success: false,
+          error: {
+            code: 'PUTER_ERROR',
+            message: 'Puter AI is currently unavailable. Please check the Puter connection.',
+            retryable: true
+          }
         });
       }
 
       if (error.message?.includes('Puter AI request timed out')) {
         return res.status(504).json({
-          error: 'Puter AI request timed out. Please try again.'
+          success: false,
+          error: {
+            code: 'PUTER_TIMEOUT',
+            message: 'Puter request timed out',
+            retryable: true
+          }
         });
       }
 

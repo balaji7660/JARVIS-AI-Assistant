@@ -19,13 +19,16 @@ import kotlinx.coroutines.flow.asStateFlow
  * Visual states supported by the floating JARVIS orb matching requirement 2.
  */
 enum class OrbVisualState(val label: String) {
+    PASSIVE("PASSIVE"),
     IDLE("JARVIS READY"),
-    LISTENING("LISTENING..."),
-    PROCESSING("THINKING..."),
-    ANALYZING("ANALYZING SCREEN..."),
-    EXECUTING("EXECUTING..."),
+    LISTENING("LISTENING"),
+    PROCESSING("PROCESSING"),
+    ANALYZING("ANALYZING SCREEN"),
+    EXECUTING("EXECUTING"),
+    SPEAKING("SPEAKING"),
+    CONFIRMATION("CONFIRMATION"),
     SUCCESS("DONE"),
-    ERROR("ACTION FAILED")
+    ERROR("ERROR")
 }
 
 /**
@@ -150,16 +153,23 @@ object JarvisOverlayController {
      */
     fun computeOrbVisualState(uiState: HomeUiState): OrbVisualState {
         return when {
-            uiState.screenAnalysisState == ScreenAnalysisState.ANALYZING -> OrbVisualState.ANALYZING
-            uiState.taskState == TaskExecutionState.COMPLETED -> OrbVisualState.SUCCESS
             uiState.taskState == TaskExecutionState.FAILED || uiState.state == AssistantState.ERROR -> OrbVisualState.ERROR
+            uiState.pendingConfirmation != null || uiState.state == AssistantState.WAITING_FOR_CONFIRMATION -> OrbVisualState.CONFIRMATION
+            uiState.screenAnalysisState == ScreenAnalysisState.ANALYZING -> OrbVisualState.ANALYZING
+            uiState.state == AssistantState.SPEAKING -> OrbVisualState.SPEAKING
+            uiState.taskState == TaskExecutionState.COMPLETED -> OrbVisualState.SUCCESS
             uiState.taskState == TaskExecutionState.EXECUTING ||
             uiState.taskState == TaskExecutionState.VERIFYING ||
-            uiState.taskState == TaskExecutionState.RETRYING -> OrbVisualState.EXECUTING
+            uiState.taskState == TaskExecutionState.RETRYING ||
+            uiState.state == AssistantState.EXECUTING -> OrbVisualState.EXECUTING
+            uiState.state == AssistantState.ACTIVE_LISTENING ||
             uiState.state == AssistantState.LISTENING ||
             uiState.wakeWordState == WakeWordState.COMMAND_LISTENING -> OrbVisualState.LISTENING
+            uiState.state == AssistantState.PROCESSING ||
             uiState.state == AssistantState.THINKING ||
             uiState.taskState == TaskExecutionState.PLANNING -> OrbVisualState.PROCESSING
+            uiState.state == AssistantState.PASSIVE_WAKE ||
+            uiState.wakeWordState == WakeWordState.LISTENING -> OrbVisualState.PASSIVE
             else -> OrbVisualState.IDLE
         }
     }
@@ -173,11 +183,12 @@ object JarvisOverlayController {
     }
 
     /**
-     * Handles long pressing on the floating orb (toggles the quick actions menu).
+     * Handles long pressing on the floating orb (stops current task/interruption per requirement 15).
      */
     fun onOrbLongPressed() {
         _isPanelOpen.value = false
         _isQuickActionsOpen.value = !_isQuickActionsOpen.value
+        bridge?.stopTask()
     }
 
     /**

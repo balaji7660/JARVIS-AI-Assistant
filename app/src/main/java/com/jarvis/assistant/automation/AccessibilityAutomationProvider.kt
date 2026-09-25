@@ -88,10 +88,13 @@ class AccessibilityAutomationProvider(
         // Priority 2: Exact visible text
         // Priority 3: Exact content description
         // Priority 4: Partial / containment visible text or description
+        // Priority 5: Omnibox / Search input field fallback
         val priority1ResourceId = mutableListOf<AccessibilityNodeInfo>()
         val priority2ExactText = mutableListOf<AccessibilityNodeInfo>()
         val priority3ExactDesc = mutableListOf<AccessibilityNodeInfo>()
         val priority4Partial = mutableListOf<AccessibilityNodeInfo>()
+        val priority5Search = mutableListOf<AccessibilityNodeInfo>()
+        val isSearchTarget = trimmed.equals("Search", ignoreCase = true) || trimmed.contains("Search", ignoreCase = true)
 
         val queue = LinkedList<AccessibilityNodeInfo>()
         queue.add(root)
@@ -119,6 +122,25 @@ class AccessibilityAutomationProvider(
                 }
             }
 
+            // Omnibox / Search input detection for Chrome & Android apps
+            if (isSearchTarget) {
+                val isSearchField = viewId.contains("search", ignoreCase = true) ||
+                        viewId.contains("url_bar", ignoreCase = true) ||
+                        desc.contains("search", ignoreCase = true) ||
+                        desc.contains("type url", ignoreCase = true) ||
+                        desc.contains("web address", ignoreCase = true) ||
+                        text.contains("search", ignoreCase = true) ||
+                        text.contains("type url", ignoreCase = true) ||
+                        (node.isEditable && (node.packageName?.contains("chrome") == true || node.packageName?.contains("browser") == true))
+
+                if (isSearchField) {
+                    val target = clickableTarget ?: if (node.isFocusable || node.isEditable) node else null
+                    if (target != null && !priority5Search.contains(target)) {
+                        priority5Search.add(target)
+                    }
+                }
+            }
+
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
@@ -129,6 +151,7 @@ class AccessibilityAutomationProvider(
             priority2ExactText.isNotEmpty() -> priority2ExactText
             priority3ExactDesc.isNotEmpty() -> priority3ExactDesc
             priority4Partial.isNotEmpty() -> priority4Partial
+            priority5Search.isNotEmpty() -> priority5Search
             else -> emptyList()
         }
 
@@ -139,7 +162,7 @@ class AccessibilityAutomationProvider(
                     message = "No visible clickable element matching '$targetText' was found."
                 )
             }
-            bestMatches.size > 1 -> {
+            bestMatches.size > 1 && priority5Search.isEmpty() -> {
                 val candidateLabels = bestMatches.take(4).mapNotNull {
                     it.text?.toString() ?: it.contentDescription?.toString() ?: it.viewIdResourceName
                 }
@@ -151,7 +174,10 @@ class AccessibilityAutomationProvider(
             }
             else -> {
                 val targetNode = bestMatches[0]
-                val performed = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                var performed = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (!performed && (targetNode.isFocusable || targetNode.isEditable)) {
+                    performed = targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                }
                 if (performed) {
                     ToolResult(success = true, message = "Clicked $targetText.")
                 } else {
@@ -376,5 +402,56 @@ class AccessibilityAutomationProvider(
             }
         }
         return null
+    }
+
+    override suspend fun getCurrentPackage(): String {
+        val service = serviceProvider.invoke()
+        if (service != null) {
+            val root = service.getRootInActiveWindowSafe()
+            val rootPkg = root?.packageName?.toString()
+            if (!rootPkg.isNullOrBlank()) {
+                return rootPkg
+            }
+            val eventPkg = service.currentPackageName
+            if (!eventPkg.isNullOrBlank()) {
+                return eventPkg
+            }
+        }
+        val result = execute(AutomationAction.ReadVisibleScreen)
+        return result.data["packageName"] as? String ?: ""
+    }
+
+    override suspend fun waitForTargetWindow(expectedPackage: String, timeoutMs: Long): Boolean {
+        val service = serviceProvider.invoke()
+        val expected = expectedPackage.trim().lowercase()
+        if (expected.isBlank()) return true
+
+        val startTime = System.currentTimeMillis()
+        val initialDelayMs = 300L
+        val pollIntervalMs = 200L
+        kotlinx.coroutines.delay(initialDelayMs)
+
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            // Check 1: Event-based current package from service
+            val eventPkg = service?.currentPackageName?.trim()?.lowercase() ?: ""
+            if (eventPkg.isNotEmpty() && (eventPkg.contains(expected) || expected.contains(eventPkg))) {
+                val root = service?.getRootInActiveWindowSafe()
+                if (root != null) {
+                    return true
+                }
+            }
+
+            // Check 2: Active window root package
+            val root = service?.getRootInActiveWindowSafe()
+            val rootPkg = root?.packageName?.toString()?.trim()?.lowercase() ?: ""
+            if (rootPkg.isNotEmpty() && (rootPkg.contains(expected) || expected.contains(rootPkg))) {
+                return true
+            }
+
+            kotlinx.coroutines.delay(pollIntervalMs)
+        }
+
+        val finalCurrent = getCurrentPackage().lowercase()
+        return finalCurrent.isNotEmpty() && (finalCurrent.contains(expected) || expected.contains(finalCurrent))
     }
 }

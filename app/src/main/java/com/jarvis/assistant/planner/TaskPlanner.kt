@@ -233,11 +233,11 @@ class DefaultTaskPlanner(
                 TaskStep(
                     stepId = 2,
                     action = "wait_for_screen",
-                    arguments = mapOf("expectedPackage" to (pkgName ?: ""), "timeoutMs" to 3000L),
+                    arguments = mapOf("expectedPackage" to (pkgName ?: ""), "timeoutMs" to TaskPlanValidator.APP_LAUNCH_WAIT_MS),
                     expectedResult = ExpectedResult(expectedScreenState = "$appName screen active"),
                     riskLevel = RiskLevel.LOW,
                     requiresConfirmation = false,
-                    timeoutMs = 3000L,
+                    timeoutMs = TaskPlanValidator.APP_LAUNCH_WAIT_MS,
                     retryCount = 1
                 )
             )

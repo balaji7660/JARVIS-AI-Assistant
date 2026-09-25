@@ -35,13 +35,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.jarvis.assistant.ui.theme.JarvisAmber
-import com.jarvis.assistant.ui.theme.JarvisBackground
-import com.jarvis.assistant.ui.theme.JarvisCyan
-import com.jarvis.assistant.ui.theme.JarvisCyanBright
-import com.jarvis.assistant.ui.theme.JarvisGreen
-import com.jarvis.assistant.ui.theme.JarvisNeonPurple
-import com.jarvis.assistant.ui.theme.JarvisRed
+import com.jarvis.assistant.ui.theme.*
 
 /**
  * Futuristic Arc-Reactor floating orb UI for JARVIS overlay.
@@ -64,7 +58,9 @@ fun JarvisFloatingOrb(
                 durationMillis = when (visualState) {
                     OrbVisualState.EXECUTING -> 1500
                     OrbVisualState.PROCESSING -> 2000
+                    OrbVisualState.SPEAKING -> 2800
                     OrbVisualState.ANALYZING -> 2500
+                    OrbVisualState.CONFIRMATION -> 4000
                     else -> 6000
                 },
                 easing = LinearEasing
@@ -79,7 +75,12 @@ fun JarvisFloatingOrb(
         targetValue = 1.15f,
         animationSpec = infiniteRepeatable(
             animation = tween(
-                durationMillis = if (visualState == OrbVisualState.LISTENING) 800 else 1800,
+                durationMillis = when (visualState) {
+                    OrbVisualState.LISTENING -> 800
+                    OrbVisualState.SPEAKING -> 900
+                    OrbVisualState.CONFIRMATION -> 1200
+                    else -> 1800
+                },
                 easing = FastOutSlowInEasing
             ),
             repeatMode = RepeatMode.Reverse
@@ -88,11 +89,13 @@ fun JarvisFloatingOrb(
     )
 
     val (primaryColor, glowColor) = when (visualState) {
-        OrbVisualState.IDLE -> JarvisCyan to JarvisCyanBright
+        OrbVisualState.PASSIVE, OrbVisualState.IDLE -> JarvisCyan to JarvisCyanBright
         OrbVisualState.LISTENING -> JarvisNeonPurple to Color(0xFFD580FF)
         OrbVisualState.PROCESSING -> JarvisCyan to JarvisCyanBright
         OrbVisualState.ANALYZING -> JarvisCyanBright to Color(0xFF80FFFF)
-        OrbVisualState.EXECUTING -> JarvisAmber to Color(0xFFFFD580)
+        OrbVisualState.EXECUTING -> JarvisGreen to Color(0xFF80FFB2)
+        OrbVisualState.SPEAKING -> JarvisBlueLight to JarvisCyan
+        OrbVisualState.CONFIRMATION -> JarvisAmber to Color(0xFFFFD580)
         OrbVisualState.SUCCESS -> JarvisGreen to Color(0xFF80FFB2)
         OrbVisualState.ERROR -> JarvisRed to Color(0xFFFF8080)
     }

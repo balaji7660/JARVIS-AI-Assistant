@@ -18,4 +18,14 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        com.jarvis.assistant.wakeword.WakeWordManager.isActivityVisible = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.jarvis.assistant.wakeword.WakeWordManager.isActivityVisible = false
+    }
 }

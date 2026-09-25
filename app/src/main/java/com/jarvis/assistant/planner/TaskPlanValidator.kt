@@ -17,8 +17,11 @@ class TaskPlanValidator {
 
     companion object {
         const val MAX_PLAN_STEPS = 12
-        const val MAX_STEP_TIMEOUT_MS = 5000L
+        const val MAX_STEP_TIMEOUT_MS = 8000L
         const val MIN_STEP_TIMEOUT_MS = 500L
+        const val APP_LAUNCH_WAIT_MS = 7000L
+        const val SCREEN_SYNC_WAIT_MS = 7000L
+        const val ACTION_EXECUTION_TIMEOUT_MS = 5000L
         const val MAX_TOTAL_TASK_TIMEOUT_MS = 60000L
         const val MAX_RETRIES_PER_STEP = 2
 
@@ -35,7 +38,55 @@ class TaskPlanValidator {
             "type_text",
             "scroll",
             "analyze_current_screen",
-            "wait_for_screen"
+            "wait_for_screen",
+            "call_contact",
+            "get_battery_status",
+            "set_volume",
+            "get_volume",
+            "set_brightness",
+            "get_brightness",
+            "toggle_flashlight",
+            "open_camera",
+            "get_device_info",
+            "get_network_status",
+            "open_wifi_settings",
+            "open_bluetooth_settings",
+            "lock_screen",
+            "play_media",
+            "pause_media",
+            "resume_media",
+            "next_track",
+            "previous_track",
+            "get_media_state",
+            "send_sms",
+            // Phase 6: Screen Assistant
+            "find_screen_element",
+            "read_current_screen",
+            "diagnose_screen_error",
+            "click_screen_element",
+            "scroll_screen",
+            // Phase 7: Web Assistant
+            "search_web",
+            "search_youtube",
+            "read_current_webpage",
+            "summarize_webpage",
+            // Phase 8: Local Notes
+            "create_note",
+            "search_notes",
+            "list_notes",
+            "update_note",
+            "delete_note",
+            // Phase 9: Reminders and Timers
+            "create_timer",
+            "cancel_timer",
+            "list_timers",
+            "create_reminder",
+            "cancel_reminder",
+            "list_reminders",
+            // Phase 10: Controlled Calendar
+            "create_calendar_event",
+            "list_calendar_events",
+            "delete_calendar_event"
         )
 
         private val DANGEROUS_COMMAND_PATTERNS = listOf(

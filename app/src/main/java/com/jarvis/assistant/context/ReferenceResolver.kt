@@ -51,10 +51,11 @@ class ReferenceResolver {
                 it.type.equals("item", ignoreCase = true)
             }.ifEmpty { elements }
 
-            return if (ordinalIndex in resultCandidates.indices) {
+            val targetIdx = if (ordinalIndex == -1) resultCandidates.lastIndex else ordinalIndex
+            return if (targetIdx in resultCandidates.indices) {
                 ReferenceResolutionResult.Resolved(
-                    target = resultCandidates[ordinalIndex],
-                    referenceText = "result #${ordinalIndex + 1}"
+                    target = resultCandidates[targetIdx],
+                    referenceText = if (ordinalIndex == -1) "last result" else "result #${targetIdx + 1}"
                 )
             } else {
                 ReferenceResolutionResult.NotFound
@@ -81,8 +82,34 @@ class ReferenceResolver {
             }
         }
 
-        // 3. App reference: "the app", "that app"
-        if (lower.contains("the app") || lower.contains("that app") || lower == "app") {
+        // 2b. Contact reference: "that contact", "the contact"
+        if (lower.contains("that contact") || lower.contains("the contact") || lower == "contact") {
+            val contactName = context.recentEntities.firstOrNull() ?: context.currentTarget
+            return if (!contactName.isNullOrBlank()) {
+                ReferenceResolutionResult.Resolved(
+                    target = ScreenElementContext(label = contactName, type = "contact"),
+                    referenceText = contactName
+                )
+            } else {
+                ReferenceResolutionResult.NotFound
+            }
+        }
+
+        // 2c. Message reference: "that message", "the message"
+        if (lower.contains("that message") || lower.contains("the message") || lower == "message") {
+            val messageText = context.recentEntities.firstOrNull() ?: context.currentTarget
+            return if (!messageText.isNullOrBlank()) {
+                ReferenceResolutionResult.Resolved(
+                    target = ScreenElementContext(label = messageText, type = "message"),
+                    referenceText = messageText
+                )
+            } else {
+                ReferenceResolutionResult.NotFound
+            }
+        }
+
+        // 3. App reference: "the app", "that app", "the current app"
+        if (lower.contains("the app") || lower.contains("that app") || lower.contains("the current app") || lower == "app") {
             val app = context.currentApp ?: context.currentPackage
             return if (app != null) {
                 ReferenceResolutionResult.Resolved(
@@ -98,7 +125,24 @@ class ReferenceResolver {
             }
         }
 
-        // 4. Pronouns & deictic references: "it", "that", "this", "there"
+        // 3b. Page reference: "the page", "that page", "this page", "the current page"
+        if (lower.contains("the page") || lower.contains("that page") || lower.contains("this page") || lower.contains("the current page") || lower == "page") {
+            val page = context.currentScreenSummary ?: context.currentApp
+            return if (page != null) {
+                ReferenceResolutionResult.Resolved(
+                    target = ScreenElementContext(
+                        label = page,
+                        type = "page",
+                        viewId = context.currentPackage
+                    ),
+                    referenceText = page
+                )
+            } else {
+                ReferenceResolutionResult.NotFound
+            }
+        }
+
+        // 4. Pronouns & deictic references: "it", "that", "this", "there", "like that"
         if (isPronounReference(lower)) {
             // First check if an explicit currentTarget was already established
             if (!context.currentTarget.isNullOrBlank()) {
@@ -138,16 +182,66 @@ class ReferenceResolver {
             lower.contains("fifth result") || lower.contains("5th result") ||
             lower.contains("fifth one") -> 4
 
+            lower.contains("last result") || lower.contains("the last result") ||
+            lower.contains("last one") || lower.contains("the last one") ||
+            lower.contains("previous result") || lower.contains("previous one") -> -1
+
             else -> null
         }
     }
 
     private fun isPronounReference(lower: String): Boolean {
         return lower == "it" || lower == "that" || lower == "this" || lower == "there" ||
+                lower == "like that" || lower.startsWith("like that") ||
                 lower.startsWith("open it") || lower.startsWith("open that") || lower.startsWith("open this") ||
                 lower.startsWith("click it") || lower.startsWith("click that") || lower.startsWith("click this") ||
                 lower.startsWith("tap it") || lower.startsWith("tap that") || lower.startsWith("tap this") ||
                 lower.startsWith("select it") || lower.startsWith("select that") || lower.startsWith("select this") ||
                 lower.contains(" open that") || lower.contains(" click that") || lower.contains(" click it")
+    }
+
+    fun isCancellationFollowUp(query: String): Boolean {
+        val lower = query.lowercase().trim()
+        return lower.startsWith("actually, don't") ||
+                lower.startsWith("don't ") ||
+                lower.startsWith("cancel ") ||
+                lower == "cancel" ||
+                lower == "never mind" ||
+                lower == "forget it" ||
+                lower == "stop" ||
+                lower == "no" ||
+                lower == "wait"
+    }
+
+    companion object {
+        /**
+         * Detects if the user is revising or correcting a previous command/confirmation (e.g. "No, Mom", "Actually open YouTube").
+         */
+        fun isTaskCorrection(query: String): Boolean {
+            val lower = query.lowercase().trim()
+            return lower.startsWith("no, ") ||
+                    lower.startsWith("no ") ||
+                    lower.startsWith("actually ") ||
+                    lower.startsWith("instead ") ||
+                    lower.startsWith("change to ") ||
+                    lower.startsWith("i meant ")
+        }
+
+        /**
+         * Extracts the new corrected command or argument from a revision query.
+         */
+        fun extractCorrectionTarget(query: String): String {
+            val clean = query.trim()
+            val lower = clean.lowercase()
+            return when {
+                lower.startsWith("no, ") -> clean.substring(4).trim()
+                lower.startsWith("no ") -> clean.substring(3).trim()
+                lower.startsWith("actually ") -> clean.substring(9).trim()
+                lower.startsWith("instead ") -> clean.substring(8).trim()
+                lower.startsWith("change to ") -> clean.substring(10).trim()
+                lower.startsWith("i meant ") -> clean.substring(8).trim()
+                else -> clean
+            }
+        }
     }
 }

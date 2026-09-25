@@ -20,4 +20,13 @@ interface ChatApiService {
     @Headers("Content-Type: application/json")
     @POST("api/plan")
     suspend fun createTaskPlan(@Body request: PlanRequest): PlanResponseDto
+
+    @retrofit2.http.GET("health")
+    suspend fun checkHealth(): retrofit2.Response<HealthResponse>
 }
+
+data class HealthResponse(
+    val status: String? = null,
+    val service: String? = null,
+    val provider: String? = null
+)

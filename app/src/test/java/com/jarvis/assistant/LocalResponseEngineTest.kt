@@ -54,7 +54,7 @@ class LocalResponseEngineTest {
 
     @Test
     fun unknownCommand_returnsNextMilestoneFallback() = runTest {
-        val expected = "JARVIS backend is currently unavailable. Please try again."
+        val expected = "JARVIS cloud intelligence is unavailable."
         assertEquals(
             expected,
             engine.generateResponse("Play some music")

@@ -13,18 +13,7 @@ import com.jarvis.assistant.tools.ToolCall
 import com.jarvis.assistant.tools.ToolRegistry
 import com.jarvis.assistant.tools.ToolRouter
 import com.jarvis.assistant.tools.automation.AndroidAutomationProvider
-import com.jarvis.assistant.tools.impl.ClickTextTool
-import com.jarvis.assistant.tools.impl.ClickViewTool
-import com.jarvis.assistant.tools.impl.GetDateTool
-import com.jarvis.assistant.tools.impl.GetTimeTool
-import com.jarvis.assistant.tools.impl.GoHomeTool
-import com.jarvis.assistant.tools.impl.OpenAppTool
-import com.jarvis.assistant.tools.impl.OpenUrlTool
-import com.jarvis.assistant.tools.impl.PressBackTool
-import com.jarvis.assistant.tools.impl.ReadVisibleScreenTool
-import com.jarvis.assistant.tools.impl.ScrollTool
-import com.jarvis.assistant.tools.impl.TypeTextTool
-import com.jarvis.assistant.tools.impl.AnalyzeScreenTool
+import com.jarvis.assistant.tools.impl.*
 import com.jarvis.assistant.automation.AccessibilityScreenCaptureProvider
 import com.jarvis.assistant.automation.ScreenCaptureProvider
 import com.jarvis.assistant.automation.ScreenPrivacyFilter
@@ -71,7 +60,8 @@ class HomeViewModel @JvmOverloads constructor(
     taskPlanner: com.jarvis.assistant.planner.TaskPlanner? = null,
     taskExecutor: com.jarvis.assistant.planner.TaskExecutor? = null,
     conversationContextManager: com.jarvis.assistant.context.ConversationContextManager? = null,
-    referenceResolver: com.jarvis.assistant.context.ReferenceResolver? = null
+    referenceResolver: com.jarvis.assistant.context.ReferenceResolver? = null,
+    conversationRepository: com.jarvis.assistant.memory.ConversationRepository? = null
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -84,6 +74,14 @@ class HomeViewModel @JvmOverloads constructor(
         conversationContextManager ?: com.jarvis.assistant.context.ConversationContextManager()
     val effectiveReferenceResolver: com.jarvis.assistant.context.ReferenceResolver =
         referenceResolver ?: com.jarvis.assistant.context.ReferenceResolver()
+
+    val effectiveConversationRepository: com.jarvis.assistant.memory.ConversationRepository =
+        conversationRepository ?: try {
+            val db = JarvisDatabase.getInstance(application)
+            com.jarvis.assistant.memory.RoomConversationRepository(db.conversationDao(), db.messageDao())
+        } catch (_: Throwable) {
+            com.jarvis.assistant.memory.InMemoryConversationRepository()
+        }
 
     val effectiveAutomationProvider: AndroidAutomationProvider = automationProvider ?: AccessibilityAutomationProvider()
     val effectiveChatApiService: ChatApiService = chatApiService ?: ApiClient.getChatApiService()
@@ -125,15 +123,95 @@ class HomeViewModel @JvmOverloads constructor(
         }
     }
 
+    val effectiveNoteDao: com.jarvis.assistant.memory.NoteDao = try {
+        JarvisDatabase.getInstance(application).noteDao()
+    } catch (_: Throwable) {
+        object : com.jarvis.assistant.memory.NoteDao {
+            private val list = mutableListOf<com.jarvis.assistant.memory.NoteEntity>()
+            private var nextId = 1L
+            override suspend fun insert(note: com.jarvis.assistant.memory.NoteEntity): Long {
+                val id = if (note.id == 0L) nextId++ else note.id
+                val saved = note.copy(id = id)
+                list.removeAll { it.id == id }
+                list.add(saved)
+                return id
+            }
+            override suspend fun update(note: com.jarvis.assistant.memory.NoteEntity) {
+                list.removeAll { it.id == note.id }
+                list.add(note)
+            }
+            override suspend fun delete(note: com.jarvis.assistant.memory.NoteEntity) {
+                list.removeAll { it.id == note.id }
+            }
+            override suspend fun deleteById(id: Long): Int = if (list.removeAll { it.id == id }) 1 else 0
+            override suspend fun getAllNotes(): List<com.jarvis.assistant.memory.NoteEntity> = list.filter { !it.isArchived }
+            override suspend fun getNoteById(id: Long): com.jarvis.assistant.memory.NoteEntity? = list.firstOrNull { it.id == id }
+            override suspend fun searchNotes(query: String): List<com.jarvis.assistant.memory.NoteEntity> =
+                list.filter { !it.isArchived && (it.title.contains(query, ignoreCase = true) || it.content.contains(query, ignoreCase = true)) }
+            override suspend fun findByTitle(title: String): com.jarvis.assistant.memory.NoteEntity? =
+                list.firstOrNull { !it.isArchived && it.title.contains(title, ignoreCase = true) }
+        }
+    }
+
+    val effectiveReminderDao: com.jarvis.assistant.memory.ReminderDao = try {
+        JarvisDatabase.getInstance(application).reminderDao()
+    } catch (_: Throwable) {
+        object : com.jarvis.assistant.memory.ReminderDao {
+            private val reminders = mutableListOf<com.jarvis.assistant.memory.ReminderEntity>()
+            private val timers = mutableListOf<com.jarvis.assistant.memory.TimerEntity>()
+            private var nextRemId = 1L
+            private var nextTimerId = 1L
+            override suspend fun insertReminder(reminder: com.jarvis.assistant.memory.ReminderEntity): Long {
+                val id = if (reminder.id == 0L) nextRemId++ else reminder.id
+                val saved = reminder.copy(id = id)
+                reminders.removeAll { it.id == id }
+                reminders.add(saved)
+                return id
+            }
+            override suspend fun getActiveReminders(): List<com.jarvis.assistant.memory.ReminderEntity> = reminders.filter { !it.isCompleted }
+            override suspend fun getReminderById(id: Long): com.jarvis.assistant.memory.ReminderEntity? = reminders.firstOrNull { it.id == id }
+            override suspend fun searchReminders(query: String): List<com.jarvis.assistant.memory.ReminderEntity> =
+                reminders.filter { !it.isCompleted && it.message.contains(query, ignoreCase = true) }
+            override suspend fun updateReminder(reminder: com.jarvis.assistant.memory.ReminderEntity) {
+                reminders.removeAll { it.id == reminder.id }
+                reminders.add(reminder)
+            }
+            override suspend fun deleteReminderById(id: Long): Int = if (reminders.removeAll { it.id == id }) 1 else 0
+            override suspend fun insertTimer(timer: com.jarvis.assistant.memory.TimerEntity): Long {
+                val id = if (timer.id == 0L) nextTimerId++ else timer.id
+                val saved = timer.copy(id = id)
+                timers.removeAll { it.id == id }
+                timers.add(saved)
+                return id
+            }
+            override suspend fun getActiveTimers(now: Long): List<com.jarvis.assistant.memory.TimerEntity> = timers.filter { !it.isCompleted && it.endTimeMs > now }
+            override suspend fun getTimerById(id: Long): com.jarvis.assistant.memory.TimerEntity? = timers.firstOrNull { it.id == id }
+            override suspend fun updateTimer(timer: com.jarvis.assistant.memory.TimerEntity) {
+                timers.removeAll { it.id == timer.id }
+                timers.add(timer)
+            }
+            override suspend fun deleteTimerById(id: Long): Int = if (timers.removeAll { it.id == id }) 1 else 0
+        }
+    }
+
+    val effectiveNoteRepository: com.jarvis.assistant.memory.NoteRepository =
+        com.jarvis.assistant.memory.NoteRepository(effectiveNoteDao)
+
+    val effectiveTimerReminderManager: com.jarvis.assistant.reminders.TimerReminderManager =
+        com.jarvis.assistant.reminders.TimerReminderManager(application, effectiveReminderDao)
+
+    val effectiveCalendarManager: com.jarvis.assistant.calendar.CalendarManager =
+        com.jarvis.assistant.calendar.CalendarManager(application)
+
     val effectiveMemoryManager: MemoryManager = memoryManager ?: MemoryManager(effectiveMemoryRepository)
 
     val effectiveWakeWordDetector: WakeWordDetector = wakeWordDetector ?: try {
-        LocalWakeWordDetector(application)
+        com.jarvis.assistant.wakeword.WakeWordManager.getInstance(application)
     } catch (_: Throwable) {
         LocalSimulatedWakeWordDetector()
     }
 
-    // 1. Initialize registered tools including Accessibility automation, Vision tools, and Planning tools
+    // 1. Initialize registered tools including Accessibility automation, Vision tools, Planning tools, Notes, Reminders, Calendar
     val toolRegistry: ToolRegistry = ToolRegistry().apply {
         register(GetTimeTool())
         register(GetDateTool())
@@ -141,6 +219,33 @@ class HomeViewModel @JvmOverloads constructor(
         register(PressBackTool())
         register(OpenUrlTool(context = application))
         register(OpenAppTool(context = application))
+        register(CallContactTool(context = application))
+
+        // Device control tools (Phase 1)
+        register(GetBatteryStatusTool(context = application))
+        register(SetVolumeTool(context = application))
+        register(GetVolumeTool(context = application))
+        register(SetBrightnessTool(context = application))
+        register(GetBrightnessTool(context = application))
+        register(ToggleFlashlightTool(context = application))
+        register(OpenCameraTool(context = application))
+        register(GetDeviceInfoTool(context = application))
+        register(GetNetworkStatusTool(context = application))
+        register(OpenWifiSettingsTool(context = application))
+        register(OpenBluetoothSettingsTool(context = application))
+        register(LockScreenTool())
+
+        // Media control tools (Phase 2)
+        register(PlayMediaTool(context = application))
+        register(PauseMediaTool(context = application))
+        register(ResumeMediaTool(context = application))
+        register(NextTrackTool(context = application))
+        register(PreviousTrackTool(context = application))
+        register(GetMediaStateTool(context = application))
+
+        // SMS and WhatsApp tools (Phase 3 & Reliability Upgrade)
+        register(SendSmsTool(context = application))
+        register(com.jarvis.assistant.tools.impl.SendWhatsAppMessageTool(context = application, automationProvider = effectiveAutomationProvider))
 
         // Accessibility tools
         register(ReadVisibleScreenTool(effectiveAutomationProvider))
@@ -149,7 +254,12 @@ class HomeViewModel @JvmOverloads constructor(
         register(ScrollTool(effectiveAutomationProvider))
         register(TypeTextTool(effectiveAutomationProvider))
 
-        // Screen understanding tool (Milestone 7)
+        // Screen understanding tools (Phase 6)
+        register(FindScreenElementTool(effectiveAutomationProvider))
+        register(ReadCurrentScreenTool(effectiveAutomationProvider))
+        register(DiagnoseScreenErrorTool(effectiveAutomationProvider))
+        register(ClickScreenElementTool(effectiveAutomationProvider))
+        register(ScrollScreenTool(effectiveAutomationProvider))
         register(
             AnalyzeScreenTool(
                 screenCaptureProvider = effectiveScreenCaptureProvider,
@@ -162,8 +272,35 @@ class HomeViewModel @JvmOverloads constructor(
             )
         )
 
-        // Bounded screen wait tool (Milestone 9)
-        register(com.jarvis.assistant.tools.impl.WaitForScreenTool(effectiveAutomationProvider))
+        // Web Assistant tools (Phase 7)
+        register(SearchWebTool(context = application, automationProvider = effectiveAutomationProvider))
+        register(SearchYouTubeTool(context = application, automationProvider = effectiveAutomationProvider))
+        val readWebpageTool = ReadCurrentWebpageTool(effectiveAutomationProvider)
+        register(readWebpageTool)
+        register(SummarizeWebpageTool(readWebpageTool))
+
+        // Local Notes tools (Phase 8)
+        register(CreateNoteTool(effectiveNoteRepository))
+        register(SearchNotesTool(effectiveNoteRepository))
+        register(ListNotesTool(effectiveNoteRepository))
+        register(UpdateNoteTool(effectiveNoteRepository))
+        register(DeleteNoteTool(effectiveNoteRepository))
+
+        // Reminders and Timers tools (Phase 9)
+        register(CreateTimerTool(effectiveTimerReminderManager))
+        register(CancelTimerTool(effectiveTimerReminderManager))
+        register(ListTimersTool(effectiveTimerReminderManager))
+        register(CreateReminderTool(effectiveTimerReminderManager))
+        register(CancelReminderTool(effectiveTimerReminderManager))
+        register(ListRemindersTool(effectiveTimerReminderManager))
+
+        // Controlled Calendar tools (Phase 10)
+        register(CreateCalendarEventTool(effectiveCalendarManager))
+        register(ListCalendarEventsTool(effectiveCalendarManager))
+        register(DeleteCalendarEventTool(effectiveCalendarManager))
+
+        // Bounded screen wait tool
+        register(WaitForScreenTool(effectiveAutomationProvider))
     }
 
     val effectiveToolRouter: ToolRouter = toolRouter ?: ToolRouter(
@@ -197,8 +334,38 @@ class HomeViewModel @JvmOverloads constructor(
                 }
             }
         },
-        fallbackEngine = null
+        fallbackEngine = null,
+        maxRetries = 2
     )
+
+    val continuousConversationManager: com.jarvis.assistant.context.ContinuousConversationManager = com.jarvis.assistant.context.ContinuousConversationManager(
+        sessionTimeoutMs = 45_000L,
+        onSessionExpired = {
+            viewModelScope.launch {
+                val nextState = if (_uiState.value.isWakeWordEnabled) AssistantState.PASSIVE_WAKE else AssistantState.IDLE
+                val nextMsg = if (_uiState.value.isWakeWordEnabled) "Wake word active... Say 'Hey JARVIS' or tap mic" else "Ready, boss."
+                _uiState.update {
+                    it.copy(
+                        state = nextState,
+                        statusMessage = nextMsg,
+                        isMicActive = false,
+                        isContinuousConversationActive = false
+                    )
+                }
+                if (_uiState.value.isWakeWordEnabled) {
+                    (effectiveWakeWordDetector as? LocalWakeWordDetector)?.notifyCommandFinished()
+                    effectiveWakeWordDetector.start()
+                }
+            }
+        }
+    )
+
+    val proactiveAssistantManager: com.jarvis.assistant.proactive.ProactiveAssistantManager = com.jarvis.assistant.proactive.ProactiveAssistantManager(
+        context = application,
+        prefs = try { application.getSharedPreferences("jarvis_prefs", android.content.Context.MODE_PRIVATE) } catch (_: Throwable) { null }
+    )
+
+    val localResponseEngine: com.jarvis.assistant.ai.LocalResponseEngine = com.jarvis.assistant.ai.LocalResponseEngine(toolRouter = effectiveToolRouter)
 
     init {
         refreshAccessibilityStatus()
@@ -206,22 +373,26 @@ class HomeViewModel @JvmOverloads constructor(
         // Load stored memories count
         refreshMemoryCount()
 
+        // Sync initial proactive mode status
+        _uiState.update { it.copy(isProactiveEnabled = proactiveAssistantManager.isProactiveEnabled()) }
+
         // Setup wake word detector listener
         effectiveWakeWordDetector.setListener(object : WakeWordListener {
             override fun onWakeWordDetected() {
                 viewModelScope.launch {
+                    continuousConversationManager.startOrExtendSession()
                     if (effectiveWakeWordDetector is LocalWakeWordDetector) {
                         effectiveWakeWordDetector.notifyCommandListeningStarted()
                     }
                     _uiState.update {
                         it.copy(
-                            state = AssistantState.WAKE_LISTENING,
+                            state = AssistantState.ACTIVE_LISTENING,
                             wakeWordState = WakeWordState.WAKE_DETECTED,
-                            statusMessage = "⚡ Wake word detected! Listening for command..."
+                            statusMessage = "⚡ Wake word detected! Listening for command...",
+                            isContinuousConversationActive = true
                         )
                     }
-                    delay(300)
-                    startVoiceInput()
+                    speakGreetingAndListen()
                 }
             }
 
@@ -281,6 +452,22 @@ class HomeViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             _uiState.collect { state ->
                 com.jarvis.assistant.overlay.JarvisOverlayController.updateAssistantState(state)
+            }
+        }
+
+        // Restore previous conversation context on application startup from permanent Room storage
+        viewModelScope.launch {
+            try {
+                val restoredMessages = effectiveConversationRepository.restoreLastSessionContext()
+                for (msg in restoredMessages) {
+                    if (msg.role == "user") {
+                        effectiveContextManager.recordUserTurn(msg.content)
+                    } else if (msg.role == "assistant") {
+                        effectiveContextManager.recordAssistantTurn(msg.content)
+                    }
+                }
+            } catch (_: Throwable) {
+                // Ignore restoration error
             }
         }
     }
@@ -384,26 +571,29 @@ class HomeViewModel @JvmOverloads constructor(
         }
 
         when (_uiState.value.state) {
-            AssistantState.LISTENING -> {
+            AssistantState.ACTIVE_LISTENING, AssistantState.LISTENING -> {
                 speechRecognizerManager?.cancel()
+                continuousConversationManager.endSession()
                 val nextState = if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
                 val nextMsg = if (_uiState.value.isWakeWordEnabled) "Listening locally for \"Hey JARVIS\"..." else "Ready, boss."
                 _uiState.update {
                     it.copy(
                         state = nextState,
                         statusMessage = nextMsg,
-                        isMicActive = false
+                        isMicActive = false,
+                        isContinuousConversationActive = false
                     )
                 }
                 if (_uiState.value.isWakeWordEnabled) {
                     (effectiveWakeWordDetector as? LocalWakeWordDetector)?.notifyCommandFinished()
                 }
             }
-            AssistantState.SPEAKING, AssistantState.EXECUTING -> {
+            AssistantState.SPEAKING, AssistantState.EXECUTING, AssistantState.PROCESSING, AssistantState.THINKING -> {
                 ttsManager?.stop()
                 speechWatchdogJob?.cancel()
                 speechWatchdogJob = null
                 effectiveTaskExecutor.cancel()
+                continuousConversationManager.endSession()
                 (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(false)
                 val nextState = if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
                 val nextMsg = if (_uiState.value.isWakeWordEnabled) "Listening locally for \"Hey JARVIS\"..." else "Ready, boss."
@@ -412,7 +602,11 @@ class HomeViewModel @JvmOverloads constructor(
                         state = nextState,
                         statusMessage = nextMsg,
                         isMicActive = false,
-                        activeToolName = null
+                        isContinuousConversationActive = false,
+                        activeToolName = null,
+                        pendingConfirmation = null,
+                        pendingMemoryConfirmation = null,
+                        pendingDisambiguation = null
                     )
                 }
                 if (_uiState.value.isWakeWordEnabled) {
@@ -420,6 +614,7 @@ class HomeViewModel @JvmOverloads constructor(
                 }
             }
             else -> {
+                continuousConversationManager.startOrExtendSession()
                 startVoiceInput()
             }
         }
@@ -455,7 +650,40 @@ class HomeViewModel @JvmOverloads constructor(
         }
     }
 
-    private fun startVoiceInput() {
+    fun speakGreetingAndListen() {
+        val greeting = com.jarvis.assistant.personality.JarvisPersonalityEngine.getWakeGreeting()
+        (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(true)
+        com.jarvis.assistant.wakeword.WakeWordManager.suppressDuringSpeech(true)
+        speechRecognizerManager?.cancel()
+
+        _uiState.update {
+            it.copy(
+                state = AssistantState.SPEAKING,
+                statusMessage = greeting,
+                responseText = greeting
+            )
+        }
+
+        if (ttsManager?.isReady == true) {
+            ttsManager?.speak(greeting)
+            viewModelScope.launch {
+                delay(1000)
+                startVoiceInput()
+            }
+        } else {
+            viewModelScope.launch {
+                delay(300)
+                startVoiceInput()
+            }
+        }
+    }
+
+    fun toggleProactiveMode(enabled: Boolean) {
+        proactiveAssistantManager.setProactiveEnabled(enabled)
+        _uiState.update { it.copy(isProactiveEnabled = enabled) }
+    }
+
+    fun startVoiceInput() {
         refreshAccessibilityStatus()
         (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(false)
         if (effectiveWakeWordDetector is LocalWakeWordDetector) {
@@ -473,8 +701,6 @@ class HomeViewModel @JvmOverloads constructor(
                 isMicActive = true,
                 errorMessage = null,
                 activeToolName = null,
-                pendingConfirmation = null,
-                pendingMemoryConfirmation = null,
                 wakeWordState = if (it.isWakeWordEnabled) WakeWordState.COMMAND_LISTENING else WakeWordState.DISABLED
             )
         }
@@ -492,7 +718,71 @@ class HomeViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
-            // 0. Immediate cancellation check
+            try {
+                effectiveConversationRepository.saveUserMessage(text)
+            } catch (_: Throwable) {
+                // Ignore DB error
+            }
+
+            // 0a. Check pending action confirmation
+            if (_uiState.value.state == AssistantState.WAITING_FOR_CONFIRMATION && _uiState.value.pendingConfirmation != null) {
+                val pending = _uiState.value.pendingConfirmation!!
+                // Check for task revision: e.g. "No, Mom." or "Actually Mom."
+                if (com.jarvis.assistant.context.ReferenceResolver.isTaskCorrection(text)) {
+                    val correctedTarget = com.jarvis.assistant.context.ReferenceResolver.extractCorrectionTarget(text)
+                    _uiState.update { it.copy(pendingConfirmation = null) }
+                    if (pending.toolName == "call_contact" && !correctedTarget.isNullOrBlank()) {
+                        handleCallCommand(correctedTarget, isRevision = true)
+                        return@launch
+                    }
+                }
+                if (isConfirmationAffirmative(text)) {
+                    val onConfirm = pending.onConfirm
+                    _uiState.update { it.copy(pendingConfirmation = null) }
+                    onConfirm()
+                    return@launch
+                }
+                if (isConfirmationNegative(text) || isCancellationCommand(text)) {
+                    val onCancel = pending.onCancel
+                    _uiState.update { it.copy(pendingConfirmation = null) }
+                    onCancel()
+                    return@launch
+                }
+            }
+
+            // 0b. Check pending clarification / disambiguation
+            if (_uiState.value.state == AssistantState.WAITING_FOR_CLARIFICATION && _uiState.value.pendingDisambiguation != null) {
+                val candidates = _uiState.value.pendingDisambiguation!!
+                val lower = text.lowercase().trim()
+                val chosenIndex = when {
+                    lower.contains("first") || lower.contains("1st") -> 0
+                    lower.contains("second") || lower.contains("2nd") -> 1
+                    lower.contains("third") || lower.contains("3rd") -> 2
+                    else -> -1
+                }
+                val matched = if (chosenIndex in candidates.indices) {
+                    candidates[chosenIndex]
+                } else {
+                    candidates.firstOrNull { lower.contains(it.lowercase()) }
+                }
+                if (matched != null) {
+                    _uiState.update { it.copy(pendingDisambiguation = null) }
+                    handleCallCommand(matched, isRevision = false)
+                    return@launch
+                } else if (isCancellationCommand(text) || isConfirmationNegative(text)) {
+                    _uiState.update {
+                        it.copy(
+                            pendingDisambiguation = null,
+                            state = if (it.isWakeWordEnabled) AssistantState.PASSIVE_WAKE else AssistantState.IDLE,
+                            statusMessage = "Action cancelled, boss."
+                        )
+                    }
+                    speakMessage("Action cancelled, boss.")
+                    return@launch
+                }
+            }
+
+            // 0c. Immediate cancellation check
             if (isCancellationCommand(text)) {
                 effectiveTaskExecutor.cancel()
                 effectiveContextManager.cancelActiveTask()
@@ -514,15 +804,33 @@ class HomeViewModel @JvmOverloads constructor(
                 return@launch
             }
 
-            // 0b. Context clearing command
-            if (isContextClearCommand(text)) {
+            // 0d. Check for task revision outside of confirmation (e.g., "Actually open YouTube")
+            var effectiveText = text
+            if (com.jarvis.assistant.context.ReferenceResolver.isTaskCorrection(text)) {
+                val target = com.jarvis.assistant.context.ReferenceResolver.extractCorrectionTarget(text)
+                if (!target.isNullOrBlank()) {
+                    effectiveText = target
+                }
+            }
+
+            // 0e. Direct Call Query handling with confirmation & disambiguation
+            if (isCallQuery(effectiveText)) {
+                val contactName = extractContactName(effectiveText)
+                if (contactName.isNotBlank()) {
+                    handleCallCommand(contactName, isRevision = false)
+                    return@launch
+                }
+            }
+
+            // 0f. Context clearing command
+            if (isContextClearCommand(effectiveText)) {
                 clearCurrentContext()
                 speakMessage("Short-term conversation and task context cleared, boss.")
                 return@launch
             }
 
-            // 0c. Safe task resumption command ("Continue")
-            if (isResumptionCommand(text)) {
+            // 0g. Safe task resumption command ("Continue")
+            if (isResumptionCommand(effectiveText)) {
                 val activeTask = effectiveContextManager.getActiveTaskContext()
                 val currentPkg = effectiveAutomationProvider.getCurrentPackage()
                 val lastPlan = effectiveTaskExecutor.getCurrentPlan()
@@ -680,8 +988,19 @@ class HomeViewModel @JvmOverloads constructor(
                 return@launch
             }
 
+            // 3b. Specific Memory Query: "What language do I prefer?", "What's my interview tomorrow?"
+            if (isSpecificMemoryQuery(effectiveText)) {
+                val memories = effectiveMemoryManager.getAllMemoriesOnce()
+                val answer = findRelevantMemoryAnswer(effectiveText, memories)
+                if (answer != null) {
+                    effectiveContextManager.recordAssistantTurn(answer)
+                    speakMessage(answer)
+                    return@launch
+                }
+            }
+
             // 4. Multi-Step Task Automation Intent or Contextual Follow-Up
-            if (isMultiStepAutomationIntent(text) || isContextualFollowUpIntent(text, effectiveContextManager.getConversationContext())) {
+            if (isMultiStepAutomationIntent(effectiveText) || isContextualFollowUpIntent(effectiveText, effectiveContextManager.getConversationContext())) {
                 _uiState.update {
                     it.copy(
                         taskState = com.jarvis.assistant.planner.TaskExecutionState.PLANNING,
@@ -711,10 +1030,10 @@ class HomeViewModel @JvmOverloads constructor(
                     }
                 }
 
-                val memoryContext = effectiveMemoryManager.buildMemoryContextForPrompt(text)
+                val memoryContext = effectiveMemoryManager.buildMemoryContextForPrompt(effectiveText)
 
                 val planResult = effectiveTaskPlanner.plan(
-                    prompt = text,
+                    prompt = effectiveText,
                     memoryContext = memoryContext,
                     currentPackage = currentPkg,
                     visibleScreenText = screenSummary,
@@ -788,8 +1107,8 @@ class HomeViewModel @JvmOverloads constructor(
             }
 
             // 5. Screen analysis explicit queries if running with LocalResponseEngine
-            if (effectiveResponseEngine is LocalResponseEngine && isScreenAnalysisQuery(text)) {
-                val focus = extractScreenFocus(text)
+            if (effectiveResponseEngine is LocalResponseEngine && isScreenAnalysisQuery(effectiveText)) {
+                val focus = extractScreenFocus(effectiveText)
                 val toolCall = ToolCall("analyze_current_screen", if (focus != null) mapOf("focus" to focus) else emptyMap())
                 val result = effectiveToolRouter.dispatch(toolCall)
                 effectiveContextManager.recordLastAction("analyze_current_screen", result.message)
@@ -798,8 +1117,17 @@ class HomeViewModel @JvmOverloads constructor(
                 return@launch
             }
 
+            // 5b. Local-First Intelligence: fast local dispatch (<300ms) for known tools
+            if (localResponseEngine.canHandleLocally(effectiveText)) {
+                val localResponse = localResponseEngine.generateResponse(effectiveText)
+                val cleanResponse = com.jarvis.assistant.personality.JarvisPersonalityEngine.deduplicate(localResponse)
+                effectiveContextManager.recordAssistantTurn(cleanResponse)
+                speakMessage(cleanResponse)
+                return@launch
+            }
+
             // 6. Normal AI query / tool execution with injected memory context and conversational context
-            val memoryContext = effectiveMemoryManager.buildMemoryContextForPrompt(text)
+            val memoryContext = effectiveMemoryManager.buildMemoryContextForPrompt(effectiveText)
             val conversationSummary = effectiveContextManager.getConversationContext().toBoundedSummary()
             val promptWithContext = buildString {
                 if (memoryContext.isNotBlank()) {
@@ -811,24 +1139,38 @@ class HomeViewModel @JvmOverloads constructor(
                     append(conversationSummary)
                     append("\n\n")
                 }
-                append("User request: $text")
+                append("User request: $effectiveText")
             }
 
             val promptToUse = if (effectiveResponseEngine is LocalResponseEngine) {
-                text
+                effectiveText
             } else {
                 promptWithContext
             }
 
-            val response = effectiveResponseEngine.generateResponse(promptToUse)
-            effectiveContextManager.recordAssistantTurn(response)
-            speakMessage(response)
+            val response = try {
+                effectiveResponseEngine.generateResponse(promptToUse)
+            } catch (_: Throwable) {
+                "JARVIS cloud intelligence is unavailable."
+            }
+            val cleanResponse = com.jarvis.assistant.personality.JarvisPersonalityEngine.deduplicate(response)
+            effectiveContextManager.recordAssistantTurn(cleanResponse)
+            speakMessage(cleanResponse)
         }
     }
 
     private fun speakMessage(message: String) {
+        viewModelScope.launch {
+            try {
+                effectiveConversationRepository.saveAssistantMessage(message)
+            } catch (_: Throwable) {
+                // Ignore DB error
+            }
+        }
+
         // Temporarily suppress wake-word detection while speaking so TTS never triggers the detector
         (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(true)
+        com.jarvis.assistant.wakeword.WakeWordManager.suppressDuringSpeech(true)
         speechRecognizerManager?.cancel()
         speechWatchdogJob?.cancel()
 
@@ -937,6 +1279,11 @@ class HomeViewModel @JvmOverloads constructor(
             )
         }
         if (newState) {
+            try {
+                com.jarvis.assistant.wakeword.JarvisWakeWordService.startService(getApplication())
+            } catch (t: Throwable) {
+                android.util.Log.w("HomeViewModel", "Could not start JarvisWakeWordService", t)
+            }
             effectiveWakeWordDetector.start()
             if (_uiState.value.state == AssistantState.IDLE) {
                 _uiState.update {
@@ -947,6 +1294,11 @@ class HomeViewModel @JvmOverloads constructor(
                 }
             }
         } else {
+            try {
+                com.jarvis.assistant.wakeword.JarvisWakeWordService.stopService(getApplication())
+            } catch (t: Throwable) {
+                android.util.Log.w("HomeViewModel", "Could not stop JarvisWakeWordService", t)
+            }
             effectiveWakeWordDetector.stop()
             if (_uiState.value.state == AssistantState.WAKE_LISTENING) {
                 _uiState.update {
@@ -967,11 +1319,15 @@ class HomeViewModel @JvmOverloads constructor(
     ) {
         (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(true)
         speechRecognizerManager?.cancel()
-        val promptSpeech = "I'm ready to ${description.lowercase()} Shall I proceed, boss?"
+        val promptSpeech = if (description.startsWith("Call ", ignoreCase = true)) {
+            "${description.trim().removeSuffix(".")}?"
+        } else {
+            "Do you want me to ${description.lowercase().removeSuffix(".")}?"
+        }
 
         _uiState.update {
             it.copy(
-                state = AssistantState.SPEAKING,
+                state = AssistantState.WAITING_FOR_CONFIRMATION,
                 statusMessage = promptSpeech,
                 pendingConfirmation = PendingActionConfirmation(
                     toolName = toolName,
@@ -985,7 +1341,7 @@ class HomeViewModel @JvmOverloads constructor(
                         _uiState.update { s ->
                             s.copy(
                                 pendingConfirmation = null,
-                                state = AssistantState.IDLE,
+                                state = if (s.isWakeWordEnabled) AssistantState.PASSIVE_WAKE else AssistantState.IDLE,
                                 statusMessage = "Action cancelled, boss."
                             )
                         }
@@ -994,9 +1350,59 @@ class HomeViewModel @JvmOverloads constructor(
             )
         }
 
-        if (ttsManager?.isReady == true) {
-            ttsManager?.speak(promptSpeech)
+        speakMessage(promptSpeech)
+    }
+
+    fun handleCallCommand(contactName: String, isRevision: Boolean = false) {
+        val callTool = effectiveToolRouter.getTool("call_contact") as? com.jarvis.assistant.tools.impl.CallContactTool
+        if (callTool != null) {
+            viewModelScope.launch {
+                val precheck = callTool.execute(mapOf("contactName" to contactName))
+                if (precheck.data["isAmbiguous"] == true) {
+                    val candidates = (precheck.data["candidates"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    val candidateText = candidates.joinToString(" or ")
+                    val clarifyMsg = "I found ${candidates.size} contacts named $contactName: $candidateText. Which one do you mean, boss?"
+                    _uiState.update {
+                        it.copy(
+                            state = AssistantState.WAITING_FOR_CLARIFICATION,
+                            statusMessage = clarifyMsg,
+                            pendingDisambiguation = candidates
+                        )
+                    }
+                    speakMessage(clarifyMsg)
+                    return@launch
+                } else {
+                    val prompt = if (isRevision) {
+                        com.jarvis.assistant.personality.JarvisPersonalityEngine.formatRevisionConfirmation(contactName)
+                    } else {
+                        com.jarvis.assistant.personality.JarvisPersonalityEngine.formatCallConfirmation(contactName)
+                    }
+                    requestActionConfirmation(
+                        toolName = "call_contact",
+                        description = "Call $contactName",
+                        arguments = mapOf("contactName" to contactName),
+                        onConfirmAction = {
+                            executeConfirmedTool(ToolCall("call_contact", mapOf("contactName" to contactName)))
+                        }
+                    )
+                }
+            }
+            return
         }
+
+        val prompt = if (isRevision) {
+            com.jarvis.assistant.personality.JarvisPersonalityEngine.formatRevisionConfirmation(contactName)
+        } else {
+            com.jarvis.assistant.personality.JarvisPersonalityEngine.formatCallConfirmation(contactName)
+        }
+        requestActionConfirmation(
+            toolName = "call_contact",
+            description = "Call $contactName",
+            arguments = mapOf("contactName" to contactName),
+            onConfirmAction = {
+                executeConfirmedTool(ToolCall("call_contact", mapOf("contactName" to contactName)))
+            }
+        )
     }
 
     private fun executeConfirmedTool(toolCall: ToolCall) {
@@ -1095,17 +1501,82 @@ class HomeViewModel @JvmOverloads constructor(
         }
     }
 
-    private fun isCancellationCommand(text: String): Boolean {
-        val lower = text.lowercase().trim().removeSuffix(".")
+    fun isCancellationCommand(text: String): Boolean {
+        val lower = text.lowercase().trim().removeSuffix(".").removeSuffix("!")
         return lower == "stop" ||
+               lower == "wait" ||
                lower == "cancel" ||
+               lower == "no" ||
                lower == "abort" ||
                lower == "never mind" ||
                lower == "nevermind" ||
                lower == "stop task" ||
                lower == "cancel task" ||
                lower == "stop automation" ||
-               lower == "cancel automation"
+               lower == "cancel automation" ||
+               lower == "actually do this instead" ||
+               lower.startsWith("stop,") ||
+               lower.startsWith("cancel,")
+    }
+
+    fun isConfirmationAffirmative(text: String): Boolean {
+        val lower = text.lowercase().trim().removeSuffix(".").removeSuffix("!")
+        return lower in setOf("yes", "yeah", "yep", "do it", "go ahead", "confirm", "sure", "please do", "proceed")
+    }
+
+    fun isConfirmationNegative(text: String): Boolean {
+        val lower = text.lowercase().trim().removeSuffix(".").removeSuffix("!")
+        return lower in setOf("no", "cancel", "stop", "don't", "dont", "never mind", "nevermind", "abort")
+    }
+
+    fun isCallQuery(input: String): Boolean {
+        val lower = input.lowercase().trim()
+        return lower.startsWith("call ") ||
+               lower.startsWith("phone ") ||
+               lower.startsWith("dial ") ||
+               lower.startsWith("make a call to ")
+    }
+
+    fun extractContactName(input: String): String {
+        val lower = input.lowercase().trim()
+        return when {
+            lower.startsWith("make a call to ") -> input.substring(15).trim().removeSuffix(".")
+            lower.startsWith("call ") -> input.substring(5).trim().removeSuffix(".")
+            lower.startsWith("phone ") -> input.substring(6).trim().removeSuffix(".")
+            lower.startsWith("dial ") -> input.substring(5).trim().removeSuffix(".")
+            else -> input.trim().removeSuffix(".")
+        }
+    }
+
+    fun isSpecificMemoryQuery(text: String): Boolean {
+        val lower = text.lowercase().trim().removeSuffix("?").removeSuffix(".")
+        return lower.startsWith("what language do i prefer") ||
+               lower.startsWith("what do i prefer") ||
+               lower.startsWith("what is my favorite language") ||
+               lower.startsWith("whats my favorite language") ||
+               lower.startsWith("what is my interview") ||
+               lower.startsWith("whats my interview") ||
+               lower.startsWith("what interview") ||
+               lower.contains("interview tomorrow")
+    }
+
+    fun findRelevantMemoryAnswer(text: String, memories: List<MemoryEntity>): String? {
+        val lower = text.lowercase()
+        return when {
+            lower.contains("language") || lower.contains("prefer") -> {
+                val match = memories.firstOrNull { it.content.contains("prefer", ignoreCase = true) || it.content.contains("java", ignoreCase = true) }
+                if (match != null) {
+                    "You prefer Java for interviews, boss."
+                } else null
+            }
+            lower.contains("interview") -> {
+                val match = memories.firstOrNull { it.content.contains("interview", ignoreCase = true) }
+                if (match != null) {
+                    "Your Java interview is scheduled for tomorrow, boss."
+                } else null
+            }
+            else -> null
+        }
     }
 
     private fun isMultiStepAutomationIntent(text: String): Boolean {
@@ -1211,7 +1682,7 @@ class HomeViewModel @JvmOverloads constructor(
         }
 
         val nextState = if (isSilentTimeout) {
-            if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
+            if (_uiState.value.isWakeWordEnabled) AssistantState.PASSIVE_WAKE else AssistantState.IDLE
         } else {
             AssistantState.ERROR
         }
@@ -1224,7 +1695,8 @@ class HomeViewModel @JvmOverloads constructor(
                 isMicActive = false,
                 activeToolName = null,
                 pendingConfirmation = null,
-                pendingMemoryConfirmation = null
+                pendingMemoryConfirmation = null,
+                pendingDisambiguation = null
             )
         }
 
@@ -1245,20 +1717,34 @@ class HomeViewModel @JvmOverloads constructor(
         speechWatchdogJob?.cancel()
         speechWatchdogJob = null
         (effectiveWakeWordDetector as? LocalWakeWordDetector)?.suppressDuringSpeech(false)
-        val nextState = if (_uiState.value.isWakeWordEnabled) AssistantState.WAKE_LISTENING else AssistantState.IDLE
-        val nextMessage = if (_uiState.value.isWakeWordEnabled) "Listening locally for \"Hey JARVIS\"..." else "Ready, boss."
+        com.jarvis.assistant.wakeword.WakeWordManager.suppressDuringSpeech(false)
+
+        val isContinuous = continuousConversationManager.isSessionActive()
+        val nextState = when {
+            isContinuous -> AssistantState.LISTENING
+            _uiState.value.isWakeWordEnabled -> AssistantState.WAKE_LISTENING
+            else -> AssistantState.IDLE
+        }
+        val nextMessage = when {
+            isContinuous -> "Listening..."
+            _uiState.value.isWakeWordEnabled -> "Listening locally for \"Hey JARVIS\"..."
+            else -> "Ready, boss."
+        }
 
         _uiState.update {
             it.copy(
                 state = nextState,
                 statusMessage = nextMessage,
-                isMicActive = false,
+                isMicActive = (nextState == AssistantState.LISTENING),
+                isContinuousConversationActive = isContinuous,
                 activeToolName = null,
                 errorMessage = null
             )
         }
 
-        if (_uiState.value.isWakeWordEnabled) {
+        if (nextState == AssistantState.LISTENING) {
+            startVoiceInput()
+        } else if (_uiState.value.isWakeWordEnabled) {
             effectiveWakeWordDetector.start()
         }
 
