@@ -6,9 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.speech.tts.Voice
+import android.util.Log
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.max
 
 interface TTSListener {
     fun onInitSuccess() {}
@@ -18,15 +19,26 @@ interface TTSListener {
     fun onSpeechError(utteranceId: String, errorMessage: String) {}
 }
 
+/**
+ * Text-to-Speech manager for JARVIS with watchdog timeout protection and masculine voice tuning.
+ * Guarantees that playback always returns an onSpeechCompleted or onSpeechError callback.
+ */
 class JarvisTTSManager(
     context: Context,
     private val listener: TTSListener
 ) : TextToSpeech.OnInitListener {
 
+    companion object {
+        private const val TAG = "JarvisTTSManager"
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private var textToSpeech: TextToSpeech? = TextToSpeech(context.applicationContext, this)
     private var isInitialized = false
     val isReady: Boolean get() = isInitialized
+
+    private var activeUtteranceId: String? = null
+    private var watchdogRunnable: Runnable? = null
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
@@ -42,27 +54,34 @@ class JarvisTTSManager(
 
                 textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
+                        val id = utteranceId.orEmpty()
                         mainHandler.post {
-                            listener.onSpeechStarted(utteranceId.orEmpty())
+                            listener.onSpeechStarted(id)
                         }
                     }
 
                     override fun onDone(utteranceId: String?) {
+                        val id = utteranceId.orEmpty()
+                        cancelWatchdog()
                         mainHandler.post {
-                            listener.onSpeechCompleted(utteranceId.orEmpty())
+                            listener.onSpeechCompleted(id)
                         }
                     }
 
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
+                        val id = utteranceId.orEmpty()
+                        cancelWatchdog()
                         mainHandler.post {
-                            listener.onSpeechError(utteranceId.orEmpty(), "TTS playback error.")
+                            listener.onSpeechError(id, "TTS playback error.")
                         }
                     }
 
                     override fun onError(utteranceId: String?, errorCode: Int) {
+                        val id = utteranceId.orEmpty()
+                        cancelWatchdog()
                         mainHandler.post {
-                            listener.onSpeechError(utteranceId.orEmpty(), "TTS error code: $errorCode")
+                            listener.onSpeechError(id, "TTS error code: $errorCode")
                         }
                     }
                 })
@@ -79,14 +98,8 @@ class JarvisTTSManager(
         }
     }
 
-    /**
-     * Configures a calm, articulate male voice characteristic of JARVIS.
-     * Selects an available male voice from the TTS engine and sets masculine pitch/cadence.
-     */
     private fun configureMaleVoice() {
         val tts = textToSpeech ?: return
-
-        // Deep, articulate, calm masculine pitch and cadence
         tts.setPitch(0.85f)
         tts.setSpeechRate(1.02f)
 
@@ -99,7 +112,6 @@ class JarvisTTSManager(
                         !voice.name.contains("female", ignoreCase = true)
                 }
 
-                // 1. Explicitly tagged male voices
                 val maleCandidate = englishVoices.firstOrNull { voice ->
                     val nameLower = voice.name.lowercase(Locale.ROOT)
                     val features = voice.features?.map { it.lowercase(Locale.ROOT) } ?: emptyList()
@@ -108,11 +120,9 @@ class JarvisTTSManager(
                         nameLower.contains("#male") ||
                         nameLower.contains("-male-")
                 } ?: englishVoices.firstOrNull { voice ->
-                    // 2. Well-known male voice identifiers in Google TTS engine
                     val nameLower = voice.name.lowercase(Locale.ROOT)
                     nameLower.contains("rjs") || nameLower.contains("iom") || nameLower.contains("iol") || nameLower.contains("fis")
                 } ?: englishVoices.firstOrNull { voice ->
-                    // 3. Fallback to British English or US voice
                     voice.locale.country.equals("GB", ignoreCase = true) || voice.locale.country.equals("US", ignoreCase = true)
                 }
 
@@ -126,6 +136,8 @@ class JarvisTTSManager(
     }
 
     fun speak(text: String, utteranceId: String = UUID.randomUUID().toString()): Boolean {
+        cancelWatchdog()
+
         if (!isInitialized || textToSpeech == null) {
             mainHandler.post {
                 listener.onSpeechError(utteranceId, "Text-to-Speech is not initialized.")
@@ -140,6 +152,21 @@ class JarvisTTSManager(
             return true
         }
 
+        activeUtteranceId = utteranceId
+
+        // Schedule watchdog timeout based on length of speech
+        // ~10 chars per second + 4s buffer, capped between 4s and 20s
+        val timeoutMs = max(4_000L, (text.length * 90L) + 4_000L).coerceAtMost(20_000L)
+        val watchdog = Runnable {
+            if (activeUtteranceId == utteranceId) {
+                Log.w(TAG, "TTS internal watchdog timeout reached for utterance $utteranceId ($timeoutMs ms). Forcing completion.")
+                activeUtteranceId = null
+                listener.onSpeechCompleted(utteranceId)
+            }
+        }
+        watchdogRunnable = watchdog
+        mainHandler.postDelayed(watchdog, timeoutMs)
+
         val params = Bundle().apply {
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         }
@@ -152,6 +179,7 @@ class JarvisTTSManager(
         ) ?: TextToSpeech.ERROR
 
         if (result != TextToSpeech.SUCCESS) {
+            cancelWatchdog()
             mainHandler.post {
                 listener.onSpeechError(utteranceId, "TextToSpeech speak failed with code $result")
             }
@@ -160,7 +188,14 @@ class JarvisTTSManager(
         return true
     }
 
+    private fun cancelWatchdog() {
+        watchdogRunnable?.let { mainHandler.removeCallbacks(it) }
+        watchdogRunnable = null
+        activeUtteranceId = null
+    }
+
     fun stop() {
+        cancelWatchdog()
         try {
             textToSpeech?.stop()
         } catch (_: Exception) {}
@@ -170,6 +205,7 @@ class JarvisTTSManager(
     }
 
     fun shutdown() {
+        cancelWatchdog()
         try {
             textToSpeech?.stop()
             textToSpeech?.shutdown()

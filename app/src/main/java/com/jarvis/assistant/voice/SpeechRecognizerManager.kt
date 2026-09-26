@@ -8,6 +8,7 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import java.util.Locale
 
 interface SpeechRecognitionListener {
@@ -19,10 +20,19 @@ interface SpeechRecognitionListener {
     fun onError(errorCode: Int, errorMessage: String) {}
 }
 
+/**
+ * Robust SpeechRecognizer lifecycle manager.
+ * Guarantees that speech recognition sessions are created and destroyed cleanly,
+ * and errors (such as ERROR_RECOGNIZER_BUSY, ERROR_CLIENT, ERROR_NO_MATCH) are safely recovered.
+ */
 class SpeechRecognizerManager(
     private val context: Context,
     private val listener: SpeechRecognitionListener
 ) {
+
+    companion object {
+        private const val TAG = "SpeechRecognizerMgr"
+    }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var speechRecognizer: SpeechRecognizer? = null
@@ -39,23 +49,19 @@ class SpeechRecognizerManager(
             }
 
             if (!isRecognitionAvailable()) {
-                listener.onError(
-                    -1,
-                    "Speech recognition service is not available on this device."
-                )
+                val errorMsg = "Speech recognition service is not available on this device."
+                Log.w(TAG, errorMsg)
+                listener.onError(-1, errorMsg)
                 return@post
             }
 
             try {
-                // Always destroy stale recognizer instance to prevent Android ERROR_CLIENT binder corruption
-                try {
-                    speechRecognizer?.destroy()
-                } catch (_: Exception) {}
-                speechRecognizer = null
+                // Destroy any stale instance first to avoid binder corruption
+                releaseRecognizerInternal()
 
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                    setRecognitionListener(createListener())
-                }
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+                recognizer.setRecognitionListener(createListener())
+                speechRecognizer = recognizer
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(
@@ -68,11 +74,15 @@ class SpeechRecognizerManager(
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 }
 
-                speechRecognizer?.startListening(intent)
+                recognizer.startListening(intent)
                 isListening = true
+                Log.i(TAG, "SpeechRecognizer started successfully.")
             } catch (e: Exception) {
                 isListening = false
-                listener.onError(-1, e.message ?: "Failed to start speech recognition.")
+                releaseRecognizerInternal()
+                val msg = e.message ?: "Failed to start speech recognition."
+                Log.e(TAG, "Exception starting SpeechRecognizer: $msg", e)
+                listener.onError(-1, msg)
             }
         }
     }
@@ -81,28 +91,32 @@ class SpeechRecognizerManager(
         mainHandler.post {
             try {
                 speechRecognizer?.stopListening()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(TAG, "Error in stopListening: ${e.message}")
+            }
             isListening = false
         }
     }
 
     fun cancel() {
         mainHandler.post {
-            try {
-                speechRecognizer?.cancel()
-                speechRecognizer?.destroy()
-            } catch (_: Exception) {}
-            speechRecognizer = null
-            isListening = false
+            releaseRecognizerInternal()
         }
     }
 
     fun destroy() {
         mainHandler.post {
-            try {
-                speechRecognizer?.cancel()
-                speechRecognizer?.destroy()
-            } catch (_: Exception) {}
+            releaseRecognizerInternal()
+        }
+    }
+
+    private fun releaseRecognizerInternal() {
+        try {
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error destroying speech recognizer: ${e.message}")
+        } finally {
             speechRecognizer = null
             isListening = false
         }
@@ -111,10 +125,12 @@ class SpeechRecognizerManager(
     private fun createListener(): RecognitionListener {
         return object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
+                Log.d(TAG, "onReadyForSpeech")
                 listener.onReady()
             }
 
             override fun onBeginningOfSpeech() {
+                Log.d(TAG, "onBeginningOfSpeech")
                 listener.onBeginningOfSpeech()
             }
 
@@ -125,40 +141,38 @@ class SpeechRecognizerManager(
             override fun onBufferReceived(buffer: ByteArray?) {}
 
             override fun onEndOfSpeech() {
+                Log.d(TAG, "onEndOfSpeech")
                 isListening = false
             }
 
             override fun onError(error: Int) {
                 isListening = false
-                try {
-                    speechRecognizer?.destroy()
-                } catch (_: Exception) {}
-                speechRecognizer = null
+                releaseRecognizerInternal()
 
                 val message = when (error) {
                     SpeechRecognizer.ERROR_AUDIO -> "Audio recording error."
-                    SpeechRecognizer.ERROR_CLIENT -> "Google Speech service unavailable or busy. Please check Google app microphone permissions."
+                    SpeechRecognizer.ERROR_CLIENT -> "Speech recognition client error. Retrying voice pipeline."
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required."
                     SpeechRecognizer.ERROR_NETWORK -> "Network connection required for speech recognition."
                     SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Speech recognition network timed out."
                     SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected. Please try again."
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech service is busy. Please try again."
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech service is busy. Retrying."
                     SpeechRecognizer.ERROR_SERVER -> "Recognition server error. Please try again."
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected."
                     else -> "Speech recognition error ($error)."
                 }
+                Log.w(TAG, "SpeechRecognizer error: $message (code: $error)")
                 listener.onError(error, message)
             }
 
             override fun onResults(results: Bundle?) {
                 isListening = false
-                try {
-                    speechRecognizer?.destroy()
-                } catch (_: Exception) {}
-                speechRecognizer = null
+                releaseRecognizerInternal()
 
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val finalTranscript = matches?.firstOrNull()?.trim().orEmpty()
+                Log.i(TAG, "Speech recognition results received. Transcript: \"$finalTranscript\"")
+
                 if (finalTranscript.isNotEmpty()) {
                     listener.onFinalResult(finalTranscript)
                 } else {

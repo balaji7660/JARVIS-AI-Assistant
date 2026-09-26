@@ -70,11 +70,10 @@ class LocalWakeWordDetector(
         }
     }
 
+    private var primaryListener: WakeWordListener? = null
+
     override fun setListener(listener: WakeWordListener?) {
-        listeners.clear()
-        if (listener != null) {
-            listeners.add(listener)
-        }
+        primaryListener = listener
     }
 
     fun addListener(listener: WakeWordListener) {
@@ -85,6 +84,9 @@ class LocalWakeWordDetector(
 
     fun removeListener(listener: WakeWordListener) {
         listeners.remove(listener)
+        if (primaryListener === listener) {
+            primaryListener = null
+        }
     }
 
     /**
@@ -209,6 +211,9 @@ class LocalWakeWordDetector(
         transitionTo(WakeWordState.TRANSITIONING)
 
         // 4. Notify listeners
+        primaryListener?.let {
+            try { it.onWakeWordDetected() } catch (t: Throwable) { Log.e(TAG, "Primary listener error", t) }
+        }
         for (l in listeners) {
             try { l.onWakeWordDetected() } catch (t: Throwable) { Log.e(TAG, "Listener error", t) }
         }
@@ -217,6 +222,9 @@ class LocalWakeWordDetector(
     private fun handleAudioError(error: String) {
         Log.e(TAG, "Audio error in wake-word detector: $error")
         transitionTo(WakeWordState.ERROR)
+        primaryListener?.let {
+            try { it.onWakeWordError(error) } catch (t: Throwable) { Log.e(TAG, "Primary listener error", t) }
+        }
         for (l in listeners) {
             try { l.onWakeWordError(error) } catch (t: Throwable) { Log.e(TAG, "Listener error", t) }
         }

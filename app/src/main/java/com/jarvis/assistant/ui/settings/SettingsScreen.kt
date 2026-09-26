@@ -63,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -573,6 +574,273 @@ fun SettingsScreen(
                                 color = TextSecondary,
                                 lineHeight = 18.sp
                             )
+                        }
+                    }
+                }
+
+                // Background Assistant & OEM Battery Optimization Section (Requirements 4, 5, 19)
+                item {
+                    val isServiceActive by com.jarvis.assistant.wakeword.WakeWordManager.isServiceActive.collectAsState()
+                    val hasRecordAudio = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    val hasPostNotifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) == PackageManager.PERMISSION_GRANTED
+                    } else true
+
+                    var isBatteryExempt by remember {
+                        mutableStateOf(com.jarvis.assistant.battery.BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context))
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                1.dp,
+                                if (isServiceActive) JarvisCyan.copy(alpha = 0.4f) else JarvisCyan.copy(alpha = 0.15f),
+                                RoundedCornerShape(16.dp)
+                            ),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = JarvisSurface.copy(alpha = 0.9f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Enable Background JARVIS",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = if (isServiceActive) "Active in foreground service" else "Inactive. Turn on for wake word outside app.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (isServiceActive) JarvisCyan else TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+
+                                Switch(
+                                    checked = uiState.isWakeWordEnabled,
+                                    onCheckedChange = {
+                                        if (hasRecordAudio) {
+                                            viewModel.toggleWakeWord()
+                                        } else {
+                                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = JarvisCyan,
+                                        checkedTrackColor = JarvisSurfaceVariant,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = JarvisSurface
+                                    )
+                                )
+                            }
+
+                            // Diagnostics & Permission Checklist
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(JarvisSurfaceVariant.copy(alpha = 0.5f))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Wake Service:", fontSize = 12.sp, color = TextSecondary)
+                                    Text(
+                                        if (isServiceActive) "RUNNING (FOREGROUND)" else "STOPPED",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isServiceActive) JarvisCyan else com.jarvis.assistant.ui.theme.JarvisAmber
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Microphone Permission:", fontSize = 12.sp, color = TextSecondary)
+                                    Text(
+                                        if (hasRecordAudio) "GRANTED" else "REQUIRED",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (hasRecordAudio) JarvisCyan else com.jarvis.assistant.ui.theme.JarvisAmber
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Notifications:", fontSize = 12.sp, color = TextSecondary)
+                                    Text(
+                                        if (hasPostNotifications) "GRANTED" else "REQUIRED",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (hasPostNotifications) JarvisCyan else com.jarvis.assistant.ui.theme.JarvisAmber
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Battery Optimization:", fontSize = 12.sp, color = TextSecondary)
+                                    Text(
+                                        if (isBatteryExempt) "UNRESTRICTED" else "RESTRICTED",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isBatteryExempt) JarvisCyan else com.jarvis.assistant.ui.theme.JarvisAmber
+                                    )
+                                }
+                            }
+
+                            if (!isBatteryExempt) {
+                                Text(
+                                    text = "Background JARVIS may be restricted by aggressive battery optimization. Exemption allows wake detection while in other apps or screen off.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = com.jarvis.assistant.ui.theme.JarvisAmber,
+                                    lineHeight = 16.sp
+                                )
+
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val intent = com.jarvis.assistant.battery.BatteryOptimizationHelper.createRequestIgnoreBatteryOptimizationsIntent(context)
+                                            context.startActivity(intent)
+                                            isBatteryExempt = com.jarvis.assistant.battery.BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                                        } catch (t: Throwable) {
+                                            android.util.Log.w("SettingsScreen", "Cannot open battery settings", t)
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = com.jarvis.assistant.ui.theme.JarvisAmber,
+                                        contentColor = Color.Black
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Allow Background Activity", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Real-Time Developer Diagnostics Section (Requirement 23)
+                item {
+                    val service = com.jarvis.assistant.wakeword.JarvisWakeWordService.getInstance()
+                    val micManager = service?.micSessionManager
+
+                    val sessionState = micManager?.sessionState?.collectAsState()?.value
+                    val micOwner = micManager?.micOwner?.collectAsState()?.value
+                    val recStatus = micManager?.recognizerStatus?.collectAsState()?.value
+                    val ttsStatus = micManager?.ttsStatus?.collectAsState()?.value
+                    val audioFocus = micManager?.audioFocusState
+
+                    val lastWake = com.jarvis.assistant.wakeword.WakeWordPreferences.getLastWakeTimestamp(context)
+                    val lastSpeech = com.jarvis.assistant.wakeword.WakeWordPreferences.getLastSpeechResultTimestamp(context)
+                    val lastError = com.jarvis.assistant.wakeword.WakeWordPreferences.getLastSpeechError(context)
+                    val startCount = com.jarvis.assistant.wakeword.WakeWordPreferences.getServiceStartCount(context)
+                    val recoveryCount = com.jarvis.assistant.wakeword.WakeWordPreferences.getServiceRecoveryCount(context)
+
+                    fun formatTime(ms: Long): String {
+                        if (ms <= 0L) return "None"
+                        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                        return sdf.format(java.util.Date(ms))
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, JarvisCyan.copy(alpha = 0.25f), RoundedCornerShape(16.dp)),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = JarvisSurface.copy(alpha = 0.9f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "Developer Diagnostics",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "HARDWARE & VOICE PIPELINE TELEMETRY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = JarvisCyan.copy(alpha = 0.7f),
+                                letterSpacing = 1.sp
+                            )
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF070B12))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Wake Service:", fontSize = 11.sp, color = TextMuted)
+                                    Text(if (service != null) "RUNNING" else "STOPPED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (service != null) JarvisCyan else TextSecondary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Wake Detector:", fontSize = 11.sp, color = TextMuted)
+                                    Text(if (sessionState == com.jarvis.assistant.voice.MicSessionState.WAKE_DETECTING) "ACTIVE" else "SUSPENDED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = JarvisCyan)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Microphone Owner:", fontSize = 11.sp, color = TextMuted)
+                                    Text(micOwner?.name ?: "FREE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = JarvisCyan)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Speech Recognizer:", fontSize = 11.sp, color = TextMuted)
+                                    Text(recStatus?.name ?: "IDLE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("TTS Status:", fontSize = 11.sp, color = TextMuted)
+                                    Text(ttsStatus?.name ?: "IDLE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Audio Focus:", fontSize = 11.sp, color = TextMuted)
+                                    Text(audioFocus?.name ?: "RELEASED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = JarvisCyan)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Last Wake Detected:", fontSize = 11.sp, color = TextMuted)
+                                    Text(formatTime(lastWake), fontSize = 11.sp, color = TextPrimary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Last Speech Result:", fontSize = 11.sp, color = TextMuted)
+                                    Text(formatTime(lastSpeech), fontSize = 11.sp, color = TextPrimary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Last Error:", fontSize = 11.sp, color = TextMuted)
+                                    Text(lastError ?: "None", fontSize = 11.sp, color = if (lastError != null) com.jarvis.assistant.ui.theme.JarvisAmber else TextPrimary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Starts / Recoveries:", fontSize = 11.sp, color = TextMuted)
+                                    Text("$startCount / $recoveryCount", fontSize = 11.sp, color = TextPrimary)
+                                }
+                            }
                         }
                     }
                 }

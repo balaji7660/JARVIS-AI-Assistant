@@ -376,6 +376,29 @@ class HomeViewModel @JvmOverloads constructor(
         // Sync initial proactive mode status
         _uiState.update { it.copy(isProactiveEnabled = proactiveAssistantManager.isProactiveEnabled()) }
 
+        // Restore background wake state from preferences on device
+        val isHeadless = try {
+            application.packageName == null
+        } catch (_: Throwable) {
+            true
+        }
+        if (!isHeadless) {
+            val backgroundWakePref = try {
+                com.jarvis.assistant.wakeword.WakeWordPreferences.isBackgroundWakeEnabled(application)
+            } catch (_: Throwable) {
+                false
+            }
+            if (backgroundWakePref) {
+                _uiState.update {
+                    it.copy(
+                        isWakeWordEnabled = true,
+                        state = AssistantState.WAKE_LISTENING,
+                        statusMessage = "Listening locally for \"Hey JARVIS\"..."
+                    )
+                }
+            }
+        }
+
         // Setup wake word detector listener
         effectiveWakeWordDetector.setListener(object : WakeWordListener {
             override fun onWakeWordDetected() {
@@ -544,11 +567,25 @@ class HomeViewModel @JvmOverloads constructor(
                     }
 
                     override fun onSpeechCompleted(utteranceId: String) {
-                        completeSpeechPlayback()
+                        if (utteranceId == "wake_greeting") {
+                            viewModelScope.launch {
+                                delay(250)
+                                startVoiceInput()
+                            }
+                        } else {
+                            completeSpeechPlayback()
+                        }
                     }
 
                     override fun onSpeechError(utteranceId: String, errorMessage: String) {
-                        handleVoiceError(errorMessage)
+                        if (utteranceId == "wake_greeting") {
+                            viewModelScope.launch {
+                                delay(250)
+                                startVoiceInput()
+                            }
+                        } else {
+                            handleVoiceError(errorMessage)
+                        }
                     }
                 }
             )
@@ -665,11 +702,7 @@ class HomeViewModel @JvmOverloads constructor(
         }
 
         if (ttsManager?.isReady == true) {
-            ttsManager?.speak(greeting)
-            viewModelScope.launch {
-                delay(1000)
-                startVoiceInput()
-            }
+            ttsManager?.speak(greeting, "wake_greeting")
         } else {
             viewModelScope.launch {
                 delay(300)
@@ -1272,6 +1305,10 @@ class HomeViewModel @JvmOverloads constructor(
 
     fun toggleWakeWord() {
         val newState = !_uiState.value.isWakeWordEnabled
+        try {
+            com.jarvis.assistant.wakeword.WakeWordPreferences.setBackgroundWakeEnabled(getApplication(), newState)
+        } catch (_: Throwable) {}
+
         _uiState.update {
             it.copy(
                 isWakeWordEnabled = newState,
@@ -1743,7 +1780,15 @@ class HomeViewModel @JvmOverloads constructor(
         }
 
         if (nextState == AssistantState.LISTENING) {
-            startVoiceInput()
+            val isHeadless = try { getApplication<Application>().packageName == null } catch (_: Throwable) { true }
+            if (isHeadless) {
+                startVoiceInput()
+            } else {
+                viewModelScope.launch {
+                    delay(250)
+                    startVoiceInput()
+                }
+            }
         } else if (_uiState.value.isWakeWordEnabled) {
             effectiveWakeWordDetector.start()
         }
